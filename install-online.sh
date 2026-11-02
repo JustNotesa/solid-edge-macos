@@ -17,7 +17,7 @@ schritt() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 fehler()  { printf '\n\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(uname -s)" = Darwin ] || fehler "Nur für macOS."
-exec </dev/tty 2>/dev/null || true   # bei „curl … | bash“ Tastatureingaben (Passwort) vom Terminal lesen
+{ exec </dev/tty; } 2>/dev/null || true   # bei „curl … | bash“ Tastatureingaben (Passwort) vom Terminal lesen
 
 schritt "Homebrew"
 if ! command -v brew >/dev/null; then

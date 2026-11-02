@@ -1,0 +1,25 @@
+# Siemens-Software, Lizenz, installierte Umgebung und Ergebnisse – nie veröffentlichen
+*.zip
+installer/
+prefix/
+prefix-*/
+dist/
+build/
+*.dmg
+*.lic
+# Heruntergeladene Laufzeiten und Quellen (siehe ANLEITUNG-DMG.md)
+runtime/
+downloads/
+d2d1-build/work/
+# Gebaute Binärdateien
+*.exe
+*.dll
+*.def
+opengl-wrapper/out/
+d2d1-build/out/
+# Laufzeit-Reste
+logs/
+*.log
+__pycache__/
+.DS_Store
+.claude/

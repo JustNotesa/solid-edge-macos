@@ -1,0 +1,603 @@
+diff -ruN a/dlls/d2d1/Makefile.in b/dlls/d2d1/Makefile.in
+--- a/dlls/d2d1/Makefile.in
++++ b/dlls/d2d1/Makefile.in
+@@ -19,6 +19,7 @@
+ 	hwnd_render_target.c \
+ 	layer.c \
+ 	mesh.c \
++	shared.c \
+ 	sprite_batch.c \
+ 	state_block.c \
+ 	stroke.c \
+diff -ruN a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
+--- a/dlls/d2d1/d2d1_private.h	2026-11-02 03:44:08
++++ b/dlls/d2d1/d2d1_private.h	2026-11-02 04:22:15
+@@ -242,6 +242,7 @@
+     IUnknown *dxgi_inner;
+     ID3D10Texture2D *readback_texture;
+     IWICBitmap *bitmap;
++    ID3D10Device1 *stat_device; /* +d2dstat only: extra reference to report the device refcount at the end. */
+ 
+     unsigned int width;
+     unsigned int height;
+@@ -1121,5 +1122,22 @@
+ 
+ HRESULT d2d_svg_document_create(ID2D1RenderTarget *rt, IStream *stream, D2D1_SIZE_F viewport, void **out);
+ void d2d_svg_document_draw(ID2D1RenderTarget *rt, void *doc);
++
++enum d2d_stat_kind
++{
++    D2D_STAT_FACTORY,
++    D2D_STAT_D3D_DEVICE,
++    D2D_STAT_D2D_DEVICE,
++    D2D_STAT_DC_RT,
++    D2D_STAT_WIC_RT,
++    D2D_STAT_HWND_RT,
++    D2D_STAT_SVG_DOC,
++    D2D_STAT_SHADER_COMPILE,
++    D2D_STAT_COUNT
++};
++
++void d2d_stat_refs(ID3D10Device1 *device, const char *where);
++void d2d_stat_event(enum d2d_stat_kind kind, LONG delta, const void *object);
++HRESULT d2d_shared_device_get(D2D1_FACTORY_TYPE factory_type, ID3D10Device1 **device);
+ 
+ #endif /* __WINE_D2D1_PRIVATE_H */
+diff -ruN a/dlls/d2d1/dc_render_target.c b/dlls/d2d1/dc_render_target.c
+--- a/dlls/d2d1/dc_render_target.c	2026-11-02 03:44:08
++++ b/dlls/d2d1/dc_render_target.c	2026-11-02 04:22:15
+@@ -99,6 +99,7 @@
+         if (render_target->dxgi_surface)
+             IDXGISurface1_Release(render_target->dxgi_surface);
+         ID3D10Device1_Release(render_target->d3d_device);
++        d2d_stat_event(D2D_STAT_DC_RT, -1, render_target);
+         free(render_target);
+     }
+ 
+@@ -896,6 +897,7 @@
+ 
+     render_target->d3d_device = d3d_device;
+     ID3D10Device1_AddRef(render_target->d3d_device);
++    d2d_stat_event(D2D_STAT_DC_RT, 1, render_target);
+ 
+     return S_OK;
+ }
+diff -ruN a/dlls/d2d1/device.c b/dlls/d2d1/device.c
+--- a/dlls/d2d1/device.c
++++ b/dlls/d2d1/device.c
+@@ -4582,6 +4582,7 @@
+         }
+         if (device->precompiled_shape_ps)
+             ID3D10Blob_Release(device->precompiled_shape_ps);
++        d2d_stat_event(D2D_STAT_D2D_DEVICE, -1, device);
+         free(device);
+     }
+ 
+@@ -4806,6 +4807,41 @@
+     return CONTAINING_RECORD(iface, struct d2d_device, ID2D1Device6_iface);
+ }
+ 
++/* The shape shaders are constant HLSL; compile them once per process instead of once per ID2D1Device
++ * (every DC/WIC render target creates its own ID2D1Device). Blobs are immutable and refcounted. */
++static ID3D10Blob *d2d_shape_vs_cache[D2D_SHAPE_TYPE_COUNT];
++static ID3D10Blob *d2d_shape_ps_cache;
++static INIT_ONCE d2d_shape_cache_once = INIT_ONCE_STATIC_INIT;
++
++static BOOL WINAPI d2d_shape_cache_init(INIT_ONCE *once, void *param, void **context)
++{
++    ID3D10Blob *compiled;
++    HRESULT hr;
++
++    for (unsigned int i = 0; i < ARRAY_SIZE(shape_info); ++i)
++    {
++        const struct shape_info *si = &shape_info[i];
++
++        if (FAILED(hr = D3DCompile(si->vs_code, si->vs_code_size, si->name, NULL, NULL,
++                "main", "vs_4_0", 0, 0, &compiled, NULL)))
++        {
++            WARN("Failed to compile shader for shape type %#x, hr %#lx.\n", si->shape_type, hr);
++            return TRUE;
++        }
++        d2d_shape_vs_cache[i] = compiled;
++        d2d_stat_event(D2D_STAT_SHADER_COMPILE, 1, compiled);
++    }
++    if (FAILED(hr = D3DCompile(shape_ps_code, sizeof(shape_ps_code) - 1, "ps", NULL, NULL,
++            "main", "ps_4_0", 0, 0, &compiled, NULL)))
++    {
++        WARN("Failed to compile the pixel shader, hr %#lx.\n", hr);
++        return TRUE;
++    }
++    d2d_shape_ps_cache = compiled;
++    d2d_stat_event(D2D_STAT_SHADER_COMPILE, 1, compiled);
++    return TRUE;
++}
++
+ HRESULT d2d_device_init(struct d2d_device *device, ID2D1Factory1 *factory, IDXGIDevice *dxgi_device,
+     bool allow_get_dxgi_device)
+ {
+@@ -4820,11 +4856,18 @@
+     IDXGIDevice_AddRef(device->dxgi_device);
+     device->allow_get_dxgi_device = allow_get_dxgi_device;
+ 
++    d2d_stat_event(D2D_STAT_D2D_DEVICE, 1, device);
++
++    InitOnceExecuteOnce(&d2d_shape_cache_once, d2d_shape_cache_init, NULL, NULL);
+     for (unsigned int i = 0; i < ARRAY_SIZE(shape_info); ++i)
+     {
+         const struct shape_info *si = &shape_info[i];
+ 
+-        if (FAILED(hr = D3DCompile(si->vs_code, si->vs_code_size, si->name, NULL, NULL,
++        if ((compiled = d2d_shape_vs_cache[i]))
++        {
++            ID3D10Blob_AddRef(compiled);
++        }
++        else if (FAILED(hr = D3DCompile(si->vs_code, si->vs_code_size, si->name, NULL, NULL,
+                 "main", "vs_4_0", 0, 0, &compiled, NULL)))
+         {
+             WARN("Failed to compile shader for shape type %#x, hr %#lx.\n", si->shape_type, hr);
+@@ -4833,7 +4876,11 @@
+         device->precompiled_shape_vs[i] = compiled;
+     }
+ 
+-    if (FAILED(hr = D3DCompile(shape_ps_code, sizeof(shape_ps_code) - 1, "ps", NULL, NULL,
++    if ((compiled = d2d_shape_ps_cache))
++    {
++        ID3D10Blob_AddRef(compiled);
++    }
++    else if (FAILED(hr = D3DCompile(shape_ps_code, sizeof(shape_ps_code) - 1, "ps", NULL, NULL,
+             "main", "ps_4_0", 0, 0, &compiled, NULL)))
+     {
+         WARN("Failed to compile the pixel shader, hr %#lx.\n", hr);
+diff -ruN a/dlls/d2d1/factory.c b/dlls/d2d1/factory.c
+--- a/dlls/d2d1/factory.c	2026-11-02 03:44:08
++++ b/dlls/d2d1/factory.c	2026-11-02 04:22:15
+@@ -24,6 +24,7 @@
+ 
+ WINE_DECLARE_DEBUG_CHANNEL(winediag);
+ WINE_DEFAULT_DEBUG_CHANNEL(d2d);
++WINE_DECLARE_DEBUG_CHANNEL(d2dstat);
+ 
+ struct d2d_settings d2d_settings =
+ {
+@@ -151,7 +152,12 @@
+     if (!refcount)
+     {
+         if (factory->device)
+-            ID3D10Device1_Release(factory->device);
++        {
++            ULONG left = ID3D10Device1_Release(factory->device);
++
++            TRACE_(d2dstat)("factory %p released d3d device %p, refcount now %lu.\n", factory, factory->device, left);
++        }
++        d2d_stat_event(D2D_STAT_FACTORY, -1, factory);
+         LIST_FOR_EACH_ENTRY_SAFE(reg, reg2, &factory->effects, struct d2d_effect_registration, entry)
+         {
+             d2d_effect_registration_cleanup(reg);
+@@ -385,9 +391,11 @@
+ {
+     HRESULT hr = S_OK;
+ 
+-    if (!factory->device && FAILED(hr = D3D10CreateDevice1(NULL, D3D10_DRIVER_TYPE_HARDWARE, NULL, D3D10_CREATE_DEVICE_BGRA_SUPPORT,
+-            D3D10_FEATURE_LEVEL_10_0, D3D10_1_SDK_VERSION, &factory->device)))
+-        WARN("Failed to create device, hr %#lx.\n", hr);
++    /* One D3D device per thread instead of per factory, see shared.c. */
++    EnterCriticalSection(&factory->cs);
++    if (!factory->device && FAILED(hr = d2d_shared_device_get(factory->factory_type, &factory->device)))
++        factory->device = NULL;
++    LeaveCriticalSection(&factory->cs);
+ 
+     *device = factory->device;
+     return hr;
+@@ -1363,6 +1371,8 @@
+     list_init(&factory->effects);
+     InitializeCriticalSection(&factory->cs);
+     InitOnceInitialize(&factory->init_builtins);
++    d2d_stat_event(D2D_STAT_FACTORY, 1, factory);
++    TRACE_(d2dstat)("factory %p type %#x.\n", factory, factory_type);
+ }
+ 
+ HRESULT WINAPI D2D1CreateFactory(D2D1_FACTORY_TYPE factory_type, REFIID iid,
+diff -ruN a/dlls/d2d1/hwnd_render_target.c b/dlls/d2d1/hwnd_render_target.c
+--- a/dlls/d2d1/hwnd_render_target.c	2026-11-02 03:44:08
++++ b/dlls/d2d1/hwnd_render_target.c	2026-11-02 04:22:15
+@@ -83,6 +83,7 @@
+     {
+         IUnknown_Release(render_target->dxgi_inner);
+         IDXGISwapChain_Release(render_target->swapchain);
++        d2d_stat_event(D2D_STAT_HWND_RT, -1, render_target);
+         free(render_target);
+     }
+ 
+@@ -947,5 +948,6 @@
+         return hr;
+     }
+ 
++    d2d_stat_event(D2D_STAT_HWND_RT, 1, render_target);
+     return S_OK;
+ }
+diff -ruN a/dlls/d2d1/shared.c b/dlls/d2d1/shared.c
+--- a/dlls/d2d1/shared.c
++++ b/dlls/d2d1/shared.c
+@@ -0,0 +1,298 @@
++/*
++ * Shared Direct3D device for d2d1 factories, plus object statistics.
++ *
++ * Wine's d2d1 creates one D3D10 device per ID2D1Factory (d2d_factory_get_device()) for DC, WIC and HWND
++ * render targets. On Windows a factory is cheap; with DXVK every D3D device is a full Vulkan device with
++ * its own submit/queue/CS threads and state-cache workers (~10 threads). Applications that create many
++ * factories (Solid Edge / Codejock ToolkitPro: >200 on the UI thread) therefore end up with thousands of
++ * threads. Single-threaded factories created on the same thread now share one device, which stays cached
++ * until that thread exits. Within a thread, all D2D work is serialised anyway; factories of different threads
++ * keep separate devices, and multi-threaded factories keep their own device as before.
++ *
++ *   D2D1_SHARED_DEVICE=thread   (default) one device per creating thread
++ *   D2D1_SHARED_DEVICE=process  one device for the whole process
++ *   D2D1_SHARED_DEVICE=0        Wine behaviour: one device per factory
++ *
++ * WINEDEBUG=+d2dstat logs factory/device/render-target/SVG lifetimes with running totals.
++ *
++ * This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser
++ * General Public License as published by the Free Software Foundation; either version 2.1 of the License, or
++ * (at your option) any later version.
++ */
++
++#include <stdlib.h>
++#include "d2d1_private.h"
++
++WINE_DEFAULT_DEBUG_CHANNEL(d2d);
++WINE_DECLARE_DEBUG_CHANNEL(d2dstat);
++
++struct d2d_shared_device
++{
++    struct list entry;
++    DWORD key;
++    ID3D10Device1 *device; /* Reference owned by the cache. */
++};
++
++static struct list d2d_shared_devices = LIST_INIT(d2d_shared_devices);
++static CRITICAL_SECTION d2d_shared_cs;
++static CRITICAL_SECTION_DEBUG d2d_shared_cs_debug =
++{
++    0, 0, &d2d_shared_cs,
++    {&d2d_shared_cs_debug.ProcessLocksList, &d2d_shared_cs_debug.ProcessLocksList},
++      0, 0, {(DWORD_PTR)(__FILE__ ": d2d_shared_cs")}
++};
++static CRITICAL_SECTION d2d_shared_cs = {&d2d_shared_cs_debug, -1, 0, 0, 0, 0};
++
++enum d2d_shared_mode
++{
++    D2D_SHARED_OFF,
++    D2D_SHARED_THREAD,
++    D2D_SHARED_PROCESS,
++};
++
++static enum d2d_shared_mode d2d_shared_mode(void)
++{
++    static LONG mode = -1;
++    char buf[16];
++    LONG m;
++
++    if ((m = ReadNoFence(&mode)) >= 0)
++        return m;
++
++    m = D2D_SHARED_THREAD;
++    if (GetEnvironmentVariableA("D2D1_SHARED_DEVICE", buf, sizeof(buf)) && buf[0])
++    {
++        if (!strcmp(buf, "0") || !_stricmp(buf, "off") || !_stricmp(buf, "factory"))
++            m = D2D_SHARED_OFF;
++        else if (!_stricmp(buf, "process") || !_stricmp(buf, "global"))
++            m = D2D_SHARED_PROCESS;
++    }
++    InterlockedExchange(&mode, m);
++    TRACE_(d2dstat)("shared device mode %ld.\n", m);
++    return m;
++}
++
++static LONG d2d_stat_counts[D2D_STAT_COUNT];
++static LONG d2d_stat_totals[D2D_STAT_COUNT];
++static const char * const d2d_stat_names[D2D_STAT_COUNT] =
++{
++    "factory", "d3d_device", "d2d_device", "dc_rt", "wic_rt", "hwnd_rt", "svg_doc", "shader_compile",
++};
++
++void d2d_stat_event(enum d2d_stat_kind kind, LONG delta, const void *object)
++{
++    LONG alive = InterlockedExchangeAdd(&d2d_stat_counts[kind], delta) + delta;
++
++    if (delta > 0)
++        InterlockedExchangeAdd(&d2d_stat_totals[kind], delta);
++    if (!TRACE_ON(d2dstat))
++        return;
++    TRACE_(d2dstat)("%s%c %p tid %04lx | alive: factory %ld, d3d_device %ld, d2d_device %ld, dc_rt %ld, "
++            "wic_rt %ld, hwnd_rt %ld, svg %ld | created: factory %ld, d3d_device %ld, d2d_device %ld, "
++            "dc_rt %ld, svg %ld, shader_compile %ld (alive %s now %ld)\n",
++            d2d_stat_names[kind], delta > 0 ? '+' : '-', object, GetCurrentThreadId(),
++            d2d_stat_counts[D2D_STAT_FACTORY], d2d_stat_counts[D2D_STAT_D3D_DEVICE],
++            d2d_stat_counts[D2D_STAT_D2D_DEVICE], d2d_stat_counts[D2D_STAT_DC_RT],
++            d2d_stat_counts[D2D_STAT_WIC_RT], d2d_stat_counts[D2D_STAT_HWND_RT],
++            d2d_stat_counts[D2D_STAT_SVG_DOC], d2d_stat_totals[D2D_STAT_FACTORY],
++            d2d_stat_totals[D2D_STAT_D3D_DEVICE], d2d_stat_totals[D2D_STAT_D2D_DEVICE],
++            d2d_stat_totals[D2D_STAT_DC_RT], d2d_stat_totals[D2D_STAT_SVG_DOC],
++            d2d_stat_totals[D2D_STAT_SHADER_COMPILE], d2d_stat_names[kind], alive);
++}
++
++void d2d_stat_refs(ID3D10Device1 *device, const char *where)
++{
++    ULONG refs;
++
++    if (!device || !TRACE_ON(d2dstat))
++        return;
++    ID3D10Device1_AddRef(device);
++    refs = ID3D10Device1_Release(device);
++    TRACE_(d2dstat)("refs %p %s: %lu\n", device, where, refs);
++}
++
++static HRESULT d2d_create_d3d_device(ID3D10Device1 **device)
++{
++    HRESULT hr;
++
++    if (FAILED(hr = D3D10CreateDevice1(NULL, D3D10_DRIVER_TYPE_HARDWARE, NULL, D3D10_CREATE_DEVICE_BGRA_SUPPORT,
++            D3D10_FEATURE_LEVEL_10_0, D3D10_1_SDK_VERSION, device)))
++    {
++        WARN("Failed to create device, hr %#lx.\n", hr);
++        return hr;
++    }
++    d2d_stat_event(D2D_STAT_D3D_DEVICE, 1, *device);
++    d2d_stat_refs(*device, "created");
++    return hr;
++}
++
++/* Locking rules (a loader-lock inversion here deadlocked Solid Edge's first start):
++ *  - d2d_shared_cs only protects the list. While holding it we only compare keys, link/unlink entries and AddRef;
++ *    never create or release a device, never load modules or start threads (DXVK does both and needs the loader
++ *    lock).
++ *  - Nothing in DllMain touches this cache. Thread exit is handled by a fiber-local-storage callback, which ntdll
++ *    runs before it takes the loader lock (LdrShutdownThread -> RtlProcessFlsData), and the device reference is
++ *    released from the thread pool, outside any lock. */
++static DWORD d2d_shared_fls = FLS_OUT_OF_INDEXES;
++static INIT_ONCE d2d_shared_fls_once = INIT_ONCE_STATIC_INIT;
++
++static void CALLBACK d2d_shared_device_release_cb(TP_CALLBACK_INSTANCE *instance, void *context)
++{
++    struct d2d_shared_device *shared = context;
++
++    TRACE_(d2dstat)("dropping cached d3d device %p of thread key %04lx.\n", shared->device, shared->key);
++    ID3D10Device1_Release(shared->device);
++    d2d_stat_event(D2D_STAT_D3D_DEVICE, -1, shared);
++    free(shared);
++}
++
++static void d2d_shared_device_release_later(struct d2d_shared_device *shared)
++{
++    if (!TrySubmitThreadpoolCallback(d2d_shared_device_release_cb, shared, NULL))
++        WARN("Failed to queue release of device %p, leaking it.\n", shared->device);
++}
++
++/* Fiber-local storage callback: runs when a thread that created a cached device exits (and on FlsFree). */
++static void WINAPI d2d_shared_device_fls_cb(void *data)
++{
++    struct d2d_shared_device *shared = data, *cur;
++    BOOL found = FALSE;
++
++    if (!shared)
++        return;
++    EnterCriticalSection(&d2d_shared_cs);
++    LIST_FOR_EACH_ENTRY(cur, &d2d_shared_devices, struct d2d_shared_device, entry)
++    {
++        if (cur != shared)
++            continue;
++        list_remove(&shared->entry);
++        found = TRUE;
++        break;
++    }
++    LeaveCriticalSection(&d2d_shared_cs);
++    if (found)
++        d2d_shared_device_release_later(shared);
++}
++
++static BOOL WINAPI d2d_shared_fls_init(INIT_ONCE *once, void *param, void **context)
++{
++    d2d_shared_fls = FlsAlloc(d2d_shared_device_fls_cb);
++    return TRUE;
++}
++
++/* Returns an AddRef'd cached device for key, or NULL. */
++static ID3D10Device1 *d2d_shared_device_lookup(DWORD key)
++{
++    struct d2d_shared_device *shared;
++    ID3D10Device1 *device = NULL;
++
++    EnterCriticalSection(&d2d_shared_cs);
++    LIST_FOR_EACH_ENTRY(shared, &d2d_shared_devices, struct d2d_shared_device, entry)
++    {
++        if (shared->key != key)
++            continue;
++        device = shared->device;
++        ID3D10Device1_AddRef(device);
++        break;
++    }
++    LeaveCriticalSection(&d2d_shared_cs);
++    return device;
++}
++
++/* Removes the entry for key if it still holds device; the caller releases it outside the lock. */
++static struct d2d_shared_device *d2d_shared_device_unlink(DWORD key, ID3D10Device1 *device)
++{
++    struct d2d_shared_device *shared, *found = NULL;
++
++    EnterCriticalSection(&d2d_shared_cs);
++    LIST_FOR_EACH_ENTRY(shared, &d2d_shared_devices, struct d2d_shared_device, entry)
++    {
++        if (shared->key != key || shared->device != device)
++            continue;
++        list_remove(&shared->entry);
++        found = shared;
++        break;
++    }
++    LeaveCriticalSection(&d2d_shared_cs);
++    return found;
++}
++
++/* Returns a new device reference for the caller (the factory). The cache keeps its own reference, so the
++ * device survives the typical "create factory, draw one icon, release everything" pattern. Without it, each
++ * factory would create a new device again; with DXVK 1.10 those are never destroyed anyway (the immediate
++ * context keeps the last ID3DDeviceContextState, which holds a public device reference -> cycle). */
++HRESULT d2d_shared_device_get(D2D1_FACTORY_TYPE factory_type, ID3D10Device1 **device)
++{
++    enum d2d_shared_mode mode = d2d_shared_mode();
++    struct d2d_shared_device *shared, *cur, *old;
++    ID3D10Device1 *existing;
++    DWORD key;
++    HRESULT hr;
++
++    /* Multi-threaded factories may be used from any thread; their render targets only lock their own
++     * factory, so they keep a private device. */
++    if (mode == D2D_SHARED_OFF || factory_type != D2D1_FACTORY_TYPE_SINGLE_THREADED)
++        return d2d_create_d3d_device(device);
++
++    key = mode == D2D_SHARED_THREAD ? GetCurrentThreadId() : 0;
++
++    if ((existing = d2d_shared_device_lookup(key)))
++    {
++        if (SUCCEEDED(hr = ID3D10Device1_GetDeviceRemovedReason(existing)))
++        {
++            TRACE_(d2dstat)("reusing d3d device %p for thread key %04lx.\n", existing, key);
++            *device = existing;
++            return S_OK;
++        }
++        WARN("Cached device %p was removed, hr %#lx; creating a new one.\n", existing, hr);
++        if ((old = d2d_shared_device_unlink(key, existing)))
++        {
++            if (mode == D2D_SHARED_THREAD && d2d_shared_fls != FLS_OUT_OF_INDEXES)
++                FlsSetValue(d2d_shared_fls, NULL);
++            d2d_shared_device_release_later(old);
++        }
++        ID3D10Device1_Release(existing);
++    }
++
++    /* Create the device without holding any lock. */
++    if (!(shared = calloc(1, sizeof(*shared))))
++        return E_OUTOFMEMORY;
++    if (FAILED(hr = d2d_create_d3d_device(&shared->device)))
++    {
++        free(shared);
++        return hr;
++    }
++    shared->key = key;
++    if (mode == D2D_SHARED_THREAD)
++        InitOnceExecuteOnce(&d2d_shared_fls_once, d2d_shared_fls_init, NULL, NULL);
++
++    EnterCriticalSection(&d2d_shared_cs);
++    existing = NULL;
++    LIST_FOR_EACH_ENTRY(cur, &d2d_shared_devices, struct d2d_shared_device, entry)
++    {
++        if (cur->key != key)
++            continue;
++        existing = cur->device; /* Lost a race (process mode): use the winner. */
++        ID3D10Device1_AddRef(existing);
++        break;
++    }
++    if (!existing)
++    {
++        list_add_tail(&d2d_shared_devices, &shared->entry);
++        ID3D10Device1_AddRef(shared->device);
++    }
++    LeaveCriticalSection(&d2d_shared_cs);
++
++    if (existing)
++    {
++        ID3D10Device1_Release(shared->device);
++        d2d_stat_event(D2D_STAT_D3D_DEVICE, -1, shared);
++        free(shared);
++        *device = existing;
++        return S_OK;
++    }
++    if (mode == D2D_SHARED_THREAD && d2d_shared_fls != FLS_OUT_OF_INDEXES)
++        FlsSetValue(d2d_shared_fls, shared);
++    *device = shared->device;
++    return S_OK;
++}
+diff -ruN a/dlls/d2d1/svg.c b/dlls/d2d1/svg.c
+--- a/dlls/d2d1/svg.c
++++ b/dlls/d2d1/svg.c
+@@ -88,6 +88,7 @@
+         free(doc->xml);
+         if (doc->factory)
+             ID2D1Factory_Release(doc->factory);
++        d2d_stat_event(D2D_STAT_SVG_DOC, -1, doc);
+         free(doc);
+     }
+     return refcount;
+@@ -256,6 +257,7 @@
+         WARN("Failed to parse SVG document.\n");
+ 
+     ID2D1RenderTarget_GetFactory(rt, &doc->factory);
++    d2d_stat_event(D2D_STAT_SVG_DOC, 1, doc);
+ 
+     TRACE("Created SVG document %p, %.8ex%.8e, image %p.\n", doc, viewport.width, viewport.height, doc->image);
+     *out = doc;
+diff -ruN a/dlls/d2d1/wic_render_target.c b/dlls/d2d1/wic_render_target.c
+--- a/dlls/d2d1/wic_render_target.c	2026-11-02 03:44:08
++++ b/dlls/d2d1/wic_render_target.c	2026-11-02 04:22:15
+@@ -21,6 +21,7 @@
+ #include "wincodec.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(d2d);
++WINE_DECLARE_DEBUG_CHANNEL(d2dstat);
+ 
+ static inline struct d2d_wic_render_target *impl_from_IUnknown(IUnknown *iface)
+ {
+@@ -47,6 +48,7 @@
+         goto end;
+     }
+ 
++    d2d_stat_refs(render_target->stat_device, "present start");
+     ID3D10Texture2D_GetDevice(render_target->readback_texture, &device);
+     ID3D10Device_CopyResource(device, (ID3D10Resource *)render_target->readback_texture, src_resource);
+     ID3D10Device_Release(device);
+@@ -94,6 +96,7 @@
+ 
+     ID3D10Texture2D_Unmap(render_target->readback_texture, 0);
+     IWICBitmapLock_Release(bitmap_lock);
++    d2d_stat_refs(render_target->stat_device, "present end");
+ 
+ end:
+     return S_OK;
+@@ -127,10 +130,22 @@
+ 
+     if (!refcount)
+     {
++        /* Release the DXGI surface before the inner render target: the latter may hold the last reference
++         * to the D3D device, and DXVK 1.10 resources do not keep their device alive. */
++        d2d_stat_refs(render_target->stat_device, "wic release start");
+         IWICBitmap_Release(render_target->bitmap);
+         ID3D10Texture2D_Release(render_target->readback_texture);
+-        IUnknown_Release(render_target->dxgi_inner);
++        d2d_stat_refs(render_target->stat_device, "wic after readback");
+         IDXGISurface_Release(render_target->dxgi_surface);
++        d2d_stat_refs(render_target->stat_device, "wic after surface");
++        IUnknown_Release(render_target->dxgi_inner);
++        d2d_stat_event(D2D_STAT_WIC_RT, -1, render_target);
++        if (render_target->stat_device)
++        {
++            ULONG left = ID3D10Device1_Release(render_target->stat_device);
++            TRACE_(d2dstat)("wic_rt %p: d3d device %p refcount after all d2d releases: %lu.\n",
++                    render_target, render_target->stat_device, left);
++        }
+         free(render_target);
+     }
+ 
+@@ -309,6 +324,13 @@
+ 
+     render_target->bitmap = bitmap;
+     IWICBitmap_AddRef(bitmap);
++    if (TRACE_ON(d2dstat))
++    {
++        render_target->stat_device = d3d_device;
++        ID3D10Device1_AddRef(d3d_device);
++        d2d_stat_refs(d3d_device, "wic init done (+1 stat)");
++    }
++    d2d_stat_event(D2D_STAT_WIC_RT, 1, render_target);
+ 
+     return S_OK;
+ }

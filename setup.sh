@@ -171,6 +171,12 @@ fi
 APP_PFAD=""
 for d in ${SE_APP_ZIEL:+"$SE_APP_ZIEL"} /Applications "$HOME/Applications"; do [ -d "$d/Solid Edge 2026.app" ] && { APP_PFAD="$d/Solid Edge 2026.app"; break; }; done
 
+if [ -n "$APP_PFAD" ] && [ ! -f "$HOME/Library/Application Support/SolidEdge2026/prefix/.se-ready" ]; then
+  schritt "Arbeitsordner der App einrichten (sonst passiert das beim ersten Start)"
+  SE_NUR_EINRICHTEN=1 "$APP_PFAD/Contents/MacOS/SolidEdge2026"
+  ok "~/Library/Application Support/SolidEdge2026"
+fi
+
 if [ "$AUFRAEUMEN" = 1 ] && [ -n "$APP_PFAD" ]; then
   schritt "Aufräumen (die App enthält alles, was sie braucht)"
   rm -rf installer runtime prefix build downloads/*.tar.* logs/*.log
@@ -180,7 +186,8 @@ fi
 schritt "Fertig"
 if [ "$STARTEN" = 1 ]; then
   if [ -n "$APP_PFAD" ]; then open "$APP_PFAD"; else (./start.sh </dev/null >/dev/null 2>&1 &); fi
-  echo "    Solid Edge startet (der allererste Start dauert ein paar Minuten länger)."
+  echo "    Solid Edge startet. Beim allerersten Öffnen prüft macOS die App – das kann ein bis zwei Minuten dauern,"
+  echo "    erst danach erscheint das Wartefenster und kurz darauf Solid Edge."
 fi
 cat <<EOF
     Solid Edge starten:   $([ -n "$APP_PFAD" ] && echo "„Solid Edge 2026“ im Ordner Programme" || echo "./start.sh")

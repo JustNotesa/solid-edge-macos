@@ -29,6 +29,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$SE_ROOT/app/launcher.sh" "$APP/Contents/MacOS/SolidEdge2026"
 chmod +x "$APP/Contents/MacOS/SolidEdge2026"
 cp "$SE_ROOT/app/Info.plist" "$APP/Contents/Info.plist"
+cp "$SE_ROOT/app/warten.js" "$APP/Contents/Resources/warten.js"   # Wartefenster beim Start
 # App-Symbol aus der installierten Edge.exe (das Siemens-Symbol liegt bewusst nicht im Repo).
 "$SE_ROOT/app/icon-erzeugen.sh" "$SE_EXE" "$APP/Contents/Resources/AppIcon.icns" \
   || echo "Hinweis: kein App-Symbol erzeugt (7z fehlt?) – die App bekommt das Standardsymbol."

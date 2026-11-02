@@ -169,6 +169,75 @@ static void set_current_md(struct memdc *md)
     if (tls_cur != TLS_OUT_OF_INDEXES) TlsSetValue(tls_cur, md);
 }
 
+/* ---- Prozessende (docs/beenden-haenger.md) ----
+ * Solid Edge räumt seine OpenGL-Kontexte in statischen Destruktoren auf, also erst in DLL_PROCESS_DETACH von
+ * render.dll (JRC::~JRC → uglDeleteContext → wglMakeCurrent(NULL, NULL)). ExitProcess hat zu dem Zeitpunkt alle
+ * anderen Threads schon beendet, auch Mesas Arbeits-Threads (Threaded Context / Zink-Flush-Queue). Der Flush beim
+ * Lösen des Kontexts wartet dann in cnd_wait auf einen Thread, den es nicht mehr gibt: Edge.exe hängt für immer.
+ * Mesa selbst räumt beim Prozessende aus genau diesem Grund nicht auf (DllMain mit lpReserved != NULL).
+ * Abhilfe: Sobald ntdll das Prozessende meldet (RtlDllShutdownInProgress), geht von hier aus kein Aufruf mehr an
+ * Mesa. wgl*-Aufrufe melden Erfolg, und die GL-Dispatch-Tabelle des Threads wird auf Mesas Leerlauf-Tabelle gesetzt,
+ * damit auch die direkt durchgereichten gl*-Funktionen nichts mehr tun. Ein FLS-Callback erledigt das gleich zu
+ * Beginn des Prozessendes (ntdll ruft ihn in LdrShutdownProcess vor allen DllMain-Aufrufen). Speicher, Grafik-
+ * ressourcen und Fenster gibt das Betriebssystem mit dem Prozess frei. Abschalten: MEMDC_GL_EXIT=0. */
+static BOOL exit_fix = TRUE;
+static BOOLEAN (WINAPI *p_RtlDllShutdownInProgress)(void);
+static void (*p_glapi_set_dispatch)(void *);
+static void (*p_glapi_set_context)(void *);
+static DWORD fls_ende = FLS_OUT_OF_INDEXES;
+
+static BOOL prozess_endet(void)
+{
+    return exit_fix && p_RtlDllShutdownInProgress && p_RtlDllShutdownInProgress();
+}
+
+/* GL dieses Threads von Mesa lösen, ohne Mesa aufzurufen (nur Mesas Thread-Zeiger in libglapi). */
+static void gl_abkoppeln(const char *wo)
+{
+    static LONG gemeldet;
+    if (p_glapi_set_dispatch) p_glapi_set_dispatch(NULL);   /* NULL = Leerlauf-Tabelle */
+    if (p_glapi_set_context) p_glapi_set_context(NULL);
+    set_current_md(NULL);
+    if (!InterlockedExchange(&gemeldet, 1)) TRACE("Prozessende (%s): GL von Mesa abgekoppelt, keine Aufräumaufrufe mehr\n", wo);
+}
+
+/* TRUE: Prozess endet, Aufruf nicht an Mesa weitergeben (GL ist dann schon abgekoppelt). */
+static BOOL beim_prozessende(const char *wo)
+{
+    if (!prozess_endet()) return FALSE;
+    gl_abkoppeln(wo);
+    return TRUE;
+}
+
+static void WINAPI fls_ende_cb(void *data)
+{
+    if (data && prozess_endet()) gl_abkoppeln("FLS");
+}
+
+static void prozessende_vorbereiten(void)
+{
+    const char *e = getenv("MEMDC_GL_EXIT");
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll"), glapi = GetModuleHandleW(L"libglapi.dll");
+    exit_fix = !(e && *e == '0');
+    if (!exit_fix) return;
+    p_RtlDllShutdownInProgress = (void *)GetProcAddress(ntdll, "RtlDllShutdownInProgress");
+    if (!glapi) glapi = GetModuleHandleW(L"libgallium_wgl.dll");   /* neuere Mesa-Builds ohne libglapi.dll */
+    if (glapi)
+    {
+        p_glapi_set_dispatch = (void *)GetProcAddress(glapi, "_glapi_set_dispatch");
+        p_glapi_set_context = (void *)GetProcAddress(glapi, "_glapi_set_context");
+    }
+    fls_ende = FlsAlloc(fls_ende_cb);
+    TRACE("Prozessende-Schutz: RtlDllShutdownInProgress %p, _glapi_set_dispatch %p, FLS %lu\n",
+          p_RtlDllShutdownInProgress, p_glapi_set_dispatch, (unsigned long)fls_ende);
+}
+
+/* Merkt sich den Thread für das FLS-Callback (nur Threads, die je einen Kontext aktuell gemacht haben). */
+static void prozessende_thread_merken(void)
+{
+    if (fls_ende != FLS_OUT_OF_INDEXES && !FlsGetValue(fls_ende)) FlsSetValue(fls_ende, (void *)1);
+}
+
 /* Größe der im Speicher-DC ausgewählten Bitmap (1x1, wenn keine gewählt ist). */
 static void bitmap_size(HDC hdc, int *w, int *h)
 {
@@ -967,6 +1036,8 @@ static void olemenu_fix_einrichten(void)
 
 BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC rc)
 {
+    if (beim_prozessende("wglMakeCurrent")) return TRUE;
+    if (rc) prozessende_thread_merken();
     hud_hooks_einrichten();
     jview_hook_einrichten();
     olemenu_fix_einrichten();
@@ -995,6 +1066,7 @@ BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC rc)
 
 BOOL WINAPI wglDeleteContext(HGLRC rc)
 {
+    if (beim_prozessende("wglDeleteContext")) return TRUE;
     struct memdc *md = current_md();
     if (md && r_GetCurrentContext() == rc) { copy_back(md); set_current_md(NULL); }
     remove_ctx(rc);
@@ -1003,6 +1075,7 @@ BOOL WINAPI wglDeleteContext(HGLRC rc)
 
 BOOL WINAPI wglShareLists(HGLRC a, HGLRC b)
 {
+    if (beim_prozessende("wglShareLists")) return TRUE;
     struct ctx *ca = find_ctx(a), *cb = find_ctx(b);
     BOOL ok = r_ShareLists(a, b);
     TRACE("wglShareLists(%p%s, %p%s) → %s\n", a, ca ? " Speicher-DC" : "", b, cb ? " Speicher-DC" : "",
@@ -1045,6 +1118,7 @@ static void renderer_dump(void)
 
 BOOL WINAPI wglSwapBuffers(HDC hdc)
 {
+    if (beim_prozessende("wglSwapBuffers")) return TRUE;
     zaehler[Z_SWAP]++;
     zusammenfassung();
     renderer_dump();
@@ -1061,6 +1135,7 @@ BOOL WINAPI wglSwapBuffers(HDC hdc)
 
 void APIENTRY glFlush(void)
 {
+    if (beim_prozessende("glFlush")) return;
     zaehler[Z_FLUSH]++;
     zusammenfassung();
     static unsigned n;
@@ -1076,6 +1151,7 @@ void APIENTRY glFlush(void)
 
 void APIENTRY glFinish(void)
 {
+    if (beim_prozessende("glFinish")) return;
     zaehler[Z_FINISH]++;
     zusammenfassung();
     renderer_dump();
@@ -1151,6 +1227,7 @@ BOOL WINAPI wglSwapLayerBuffers(HDC hdc, UINT planes)
 {
     static unsigned n;
     BOOL ok;
+    if (beim_prozessende("wglSwapLayerBuffers")) return TRUE;
     if (is_memdc(hdc) && (planes & 1)) { wglSwapBuffers(hdc); ok = TRUE; }
     else ok = r_SwapLayerBuffers(hdc, planes);
     if (OFT_PROTOKOLLIEREN(n)) TRACE("wglSwapLayerBuffers #%u (%p, Ebenen %#x) → %d\n", n, hdc, planes, ok);
@@ -1266,6 +1343,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
             fprintf(stderr, "memdc_gl: mesaogl32.dll fehlt oder ist unvollständig\n");
             return FALSE;
         }
+        prozessende_vorbereiten();
         TRACE("geladen, Mesa-opengl32 als mesaogl32.dll\n");
     }
     return TRUE;

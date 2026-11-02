@@ -9,38 +9,44 @@
 # Umgebungsvariablen: SE_ZIEL (Projektordner, Standard ~/solid-edge-macos), SE_ZWEIG (Git-Zweig, Standard main).
 set -euo pipefail
 
-REPO="JustNotesa/solid-edge-macos"
-ZWEIG="${SE_ZWEIG:-main}"
-ZIEL="${SE_ZIEL:-$HOME/solid-edge-macos}"
+main() {
+  REPO="JustNotesa/solid-edge-macos"
+  ZWEIG="${SE_ZWEIG:-main}"
+  ZIEL="${SE_ZIEL:-$HOME/solid-edge-macos}"
 
-schritt() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-fehler()  { printf '\n\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
+  schritt() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
+  fehler()  { printf '\n\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = Darwin ] || fehler "Nur für macOS."
-{ exec </dev/tty; } 2>/dev/null || true   # bei „curl … | bash“ Tastatureingaben (Passwort) vom Terminal lesen
+  [ "$(uname -s)" = Darwin ] || fehler "Nur für macOS."
+  # bei „curl … | bash“ Tastatureingaben (Passwort) vom Terminal lesen. Geht erst hier, weil bash das Skript
+  # selbst über stdin liest – als Funktion ist es bereits vollständig eingelesen.
+  { exec </dev/tty; } 2>/dev/null || true
 
-schritt "Homebrew"
-if ! command -v brew >/dev/null; then
-  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$b" ] && eval "$("$b" shellenv)" && break; done
-fi
-if ! command -v brew >/dev/null; then
-  echo "    Homebrew wird installiert (dabei wirst du einmal nach deinem Mac-Passwort gefragt) …"
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$b" ] && eval "$("$b" shellenv)" && break; done
-  command -v brew >/dev/null || fehler "Homebrew-Installation fehlgeschlagen."
-fi
-echo "    ✓ $(brew --version | head -1)"
+  schritt "Homebrew"
+  if ! command -v brew >/dev/null; then
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$b" ] && eval "$("$b" shellenv)" && break; done
+  fi
+  if ! command -v brew >/dev/null; then
+    echo "    Homebrew wird installiert (dabei wirst du einmal nach deinem Mac-Passwort gefragt) …"
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$b" ] && eval "$("$b" shellenv)" && break; done
+    command -v brew >/dev/null || fehler "Homebrew-Installation fehlgeschlagen."
+  fi
+  echo "    ✓ $(brew --version | head -1)"
 
-schritt "Projekt laden nach $ZIEL"
-if [ -d "$ZIEL/.git" ] && command -v git >/dev/null; then
-  git -C "$ZIEL" pull -q --ff-only || echo "    (Aktualisieren übersprungen – lokale Änderungen?)"
-elif [ -f "$ZIEL/setup.sh" ]; then
-  echo "    ✓ vorhanden"
-else
-  mkdir -p "$ZIEL"
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$ZWEIG" | tar -xz -C "$ZIEL" --strip-components 1
-fi
-[ -x "$ZIEL/setup.sh" ] || fehler "setup.sh fehlt in $ZIEL"
+  schritt "Projekt laden nach $ZIEL"
+  if [ -d "$ZIEL/.git" ] && command -v git >/dev/null; then
+    git -C "$ZIEL" pull -q --ff-only || echo "    (Aktualisieren übersprungen – lokale Änderungen?)"
+  else
+    # ohne Git: Archiv laden bzw. bei erneutem Aufruf darüber entpacken (aktualisiert die Skripte,
+    # bereits geladene Laufzeiten und die Installation bleiben erhalten)
+    mkdir -p "$ZIEL"
+    curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$ZWEIG" | tar -xz -C "$ZIEL" --strip-components 1
+  fi
+  [ -x "$ZIEL/setup.sh" ] || fehler "setup.sh fehlt in $ZIEL"
 
-cd "$ZIEL"
-exec ./setup.sh --app --aufraeumen --starten
+  cd "$ZIEL"
+  exec ./setup.sh --app --aufraeumen --starten
+}
+
+main "$@"; exit $?

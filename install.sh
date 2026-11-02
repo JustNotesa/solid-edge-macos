@@ -6,7 +6,6 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 step() { printf '\n==> %s\n' "$*"; }
-winpfad() { "$WINE" winepath -w "$1" 2>/dev/null; }
 
 # NGen (.NET-Vorkompilierung) hängt unter Wine oft endlos bei 100 % CPU und blockiert damit den
 # .NET-Installer. Dieser Wächter beendet NGen-Prozesse, die länger als 5 Minuten laufen.
@@ -104,11 +103,18 @@ $NIEDRIG "$WINE" "$SE_INSTALLER/ISSetupPrerequisites/MS VC++ 2022 Redist (x64)/V
 "$WINESERVER" -w
 
 step "Solid Edge 2026 installieren (still, Log: logs/msi-install.log)"
-$NIEDRIG "$WINE" msiexec /i "$SE_INSTALLER/Siemens Solid Edge 2026.msi" /qn /norestart \
-  LICENSEDIR="$(winpfad "$SE_INSTALLER/LicenseFile")" \
-  /l*v "$(winpfad "$SE_LOGS/msi-install.log")" \
+# Installer-Ordner vorübergehend als Laufwerk S: einhängen und msiexec nur kurze Windows-Pfade geben: Mit dem
+# Unix-Pfad stürzt Wines msiexec ab, sobald das Projekt etwas tiefer liegt (Seitenfehler, der Pfadtext überschreibt
+# die Rücksprungadresse; Log bleibt leer). Das Log entsteht im Prefix und wird danach nach logs/ kopiert.
+LW_S="$WINEPREFIX/dosdevices/s:"
+ln -sfn "$SE_INSTALLER" "$LW_S"
+rm -f "$WINEPREFIX/drive_c/windows/temp/msi-install.log"
+$NIEDRIG "$WINE" msiexec /i 'S:\Siemens Solid Edge 2026.msi' /qn /norestart LICENSEDIR='S:\LicenseFile' \
+  /l*v 'C:\windows\temp\msi-install.log' \
   || echo "msiexec meldet Rückgabewert $? (unter Wine oft 103 trotz Erfolg) – maßgeblich ist, ob Edge.exe da ist."
 "$WINESERVER" -w
+cp "$WINEPREFIX/drive_c/windows/temp/msi-install.log" "$SE_LOGS/msi-install.log" 2>/dev/null || true
+rm -f "$LW_S"
 
 if [ -f "$SE_EXE" ]; then
   step "OpenGL für die 3D-Ansicht: Mesa-Zink (GPU)"

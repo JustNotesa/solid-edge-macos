@@ -2,8 +2,8 @@
 //   osascript -l JavaScript warten.js <pid> <titel> <status-datei> <log-datei> [<wahl-datei>]
 // Zeigt die Schritte des Starters (Zeilen aus der Status-Datei) und die letzten Zeilen der laufenden Ausgabe
 // (start.log), damit man sieht, dass noch etwas passiert. Sobald der Prozess <pid> (nach dem exec des Starters:
-// Edge.exe) seinen Startbildschirm zeigt, legt es sich dahinter; es schließt sich, wenn das Hauptfenster erscheint,
-// der Prozess endet oder nach 15 Minuten.
+// Edge.exe) seinen Startbildschirm zeigt, holt es Solid Edge nach vorn und legt sich dahinter; es schließt sich, wenn
+// das Hauptfenster erscheint, der Prozess endet, man es schließt oder nach 15 Minuten.
 // Mit <wahl-datei> (erster Start, Modus noch offen) fragt das Fenster zuerst per Dialog „Installiert“/„Portabel“ und
 // schreibt die Antwort (installiert, portabel oder abbrechen) in diese Datei; der Starter wartet darauf. Die Dateien
 // liegen dann in einem Zwischenordner, den das Fenster am Ende wegräumt.
@@ -32,7 +32,7 @@ function run(argv) {
     // Varianten wird hervorgehoben; Esc = Abbrechen.
     // Das Wartefenster steht dahinter und zeigt solange „Warte auf deine Auswahl“.
     f.schritte.stringValue = lesen(statusDatei, 1) + '\n⏳  Warte auf deine Auswahl: Installiert oder Portabel';
-    f.win.orderFrontRegardless;
+    vornZeigen(f.win);
     let antwort = 'abbrechen';
     try {
       SA.activate();
@@ -45,8 +45,9 @@ function run(argv) {
     } catch (e) { antwort = 'abbrechen'; }   // Abbrechen/Esc wirft einen Fehler
     $(antwort).writeToFileAtomicallyEncodingError(wahlDatei, true, $.NSUTF8StringEncoding, null);
     if (antwort === 'abbrechen') { f.win.close; aufraeumen(statusDatei, logDatei, wahlDatei); return; }
+    vornZeigen(f.win);
   } else {
-    f.win.orderFrontRegardless;
+    vornZeigen(f.win);
   }
 
   const start = Date.now();
@@ -65,22 +66,23 @@ function run(argv) {
       letzteAusgabe = ausgabe;
     }
     if (!prozessLebt(pid)) break;
-    // Erstes großes Fenster = Startbildschirm. Wine zeigt es erst einige Sekunden leer (unsichtbar) an, bevor es
-    // gezeichnet ist – das Wartefenster schließt deshalb noch nicht, sondern legt sich direkt dahinter: Solange der
-    // Startbildschirm leer ist, sieht man das Wartefenster, danach deckt er es zu. Erst wenn ein weiteres Fenster
-    // erscheint (Solid Edges Hauptfenster) oder der Startbildschirm wieder verschwindet, schließt es sich.
+    if (!f.win.isVisible && !f.win.isMiniaturized) break;   // vom Benutzer geschlossen
+    // Erstes großes Fenster = Startbildschirm. Wine zeigt es erst einige Sekunden leer (unsichtbar) an und holt
+    // Solid Edge nicht selbst nach vorn. Das Wartefenster (solange es die aktive App ist) übergibt deshalb den
+    // Vordergrund an Solid Edge und legt sich mittig direkt hinter den Startbildschirm: Solange der leer ist, sieht man
+    // das Wartefenster, danach deckt er es zu. Schließen, wenn das Hauptfenster erscheint oder der Startbildschirm geht.
     const fenster = grosseFenster(pid);
     const nummern = fenster.map(w => w.nummer);
     if (!startbild && fenster.length) {
       startbild = fenster[0].nummer;
-      // mittig hinter den Startbildschirm (CG-Koordinaten: Ursprung oben links, Cocoa: unten links)
-      const b = fenster[0].rahmen, hoehe = $.NSScreen.screens.objectAtIndex(0).frame.size.height;
-      if (b.Width >= B && b.Height >= H)
-        f.win.setFrameOrigin($.NSMakePoint(b.X + (b.Width - B) / 2, hoehe - (b.Y + (b.Height - H) / 2) - H));
-      f.win.level = $.NSNormalWindowLevel;
+      const r = fenster[0].rahmen, hoehe = $.NSScreen.screens.objectAtIndex(0).frame.size.height;
+      const fh = f.win.frame.size.height, fb = f.win.frame.size.width;
+      if (r.Width >= fb && r.Height >= fh)
+        f.win.setFrameOrigin($.NSMakePoint(r.X + (r.Width - fb) / 2, hoehe - (r.Y + (r.Height - fh) / 2) - fh));
+      nachVorn(pid);
       f.win.orderWindowRelativeTo($.NSWindowBelow, startbild);
     } else if (startbild && (nummern.some(n => n !== startbild) || nummern.indexOf(startbild) < 0)) {
-      break;
+      break;   // Solid Edge nicht noch einmal nach vorn holen – wer inzwischen woanders arbeitet, wird nicht gestört
     }
   }
   f.win.close;
@@ -89,10 +91,12 @@ function run(argv) {
 
 // Fenster mit Kopfzeile, Schritten und laufender Ausgabe.
 function fensterBauen(titel) {
-  const win = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer(
-    $.NSMakeRect(0, 0, B, H), $.NSWindowStyleMaskTitled, $.NSBackingStoreBuffered, false);
+  // Normales Fenster mit Schließen-/Minimieren-Knopf (kein „immer obenauf“) – man kann es jederzeit wegklicken.
+  const win = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0, 0, B, H),
+    $.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable | $.NSWindowStyleMaskMiniaturizable,
+    $.NSBackingStoreBuffered, false);
   win.title = 'Solid Edge 2026';
-  win.level = $.NSFloatingWindowLevel;
+  win.releasedWhenClosed = false;
   win.center;
   // Fortschritt in eigener Ebene, damit die Wahl sie vorher verdecken kann.
   const v = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, B, H));
@@ -174,6 +178,21 @@ function quoted(p) { return "'" + p.replace(/'/g, "'\\''") + "'"; }
 
 function prozessLebt(pid) {
   try { SA.doShellScript('kill -0 ' + pid); return true; } catch (e) { return false; }
+}
+
+// Solid Edge (Prozess <pid>) zur aktiven App machen (klappt nur, solange das Wartefenster selbst aktiv ist).
+function nachVorn(pid) {
+  try {
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
+    if (app && !app.isNil()) app.activateWithOptions($.NSApplicationActivateAllWindows);
+  } catch (e) {}
+}
+
+// Wartefenster zeigen und die eigene App aktivieren. Nur die aktive App darf (seit macOS 14) eine andere – hier
+// Solid Edge – nach vorn holen; außerdem ist das Fenster so sichtbar, ohne „immer obenauf“ zu sein.
+function vornZeigen(win) {
+  try { SA.activate(); } catch (e) {}
+  win.makeKeyAndOrderFront(null);
 }
 
 // Sichtbare, große Fenster (≥ 300×150, normale Ebene) des Prozesses <pid>: [{nummer, rahmen}].

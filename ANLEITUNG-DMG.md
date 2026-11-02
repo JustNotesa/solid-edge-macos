@@ -16,6 +16,9 @@ Schritt für Schritt beschrieben, die zugehörigen Skripte und Patches liegen in
 
 ---
 
+> **Nur schnell eine laufende Version?** `git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --app`
+> – Installer-ZIP von Siemens vorher nach `~/Downloads` legen. Diese Anleitung erklärt, was dabei passiert.
+
 ## Inhalt
 
 1. [Rechtliches – bitte zuerst lesen](#1-rechtliches--bitte-zuerst-lesen)
@@ -185,7 +188,11 @@ Profilfehlerassistent.
 
 - Baut `Solid Edge 2026.app`: Starter `app/launcher.sh` als `Contents/MacOS/SolidEdge2026`, `app/Info.plist`,
   Wine-Laufzeit und Prefix als Vorlage unter `Contents/Resources/` (per APFS-Klon, kostet keinen Platz).
-- Räumt den Prefix auf (Temp, Logs, Laufwerks-Links, Diagnoseordner, Testdateien).
+- Räumt den Prefix auf (Temp, Logs, Laufwerks-Links, Diagnoseordner, Testdateien) und **entfernt persönliche
+  Daten** (`app/prefix-anonymisieren.py`): Benutzername → `user` (der Starter setzt beim ersten Start den
+  jeweiligen Mac-Benutzer ein), Zuletzt-geöffnet-Listen, Registry-Einträge mit Pfaden ins eigene Home
+  (z. B. eigene Schriften), Installationsquelle, WebView2-Browserprofil, Nutzungsstatistik, Protokolle.
+- Mit `--app` wird statt der DMG nur die App nach /Programme gelegt.
 - Packt mit `hdiutil` als LZFSE (`DMG_FORMAT=ULMO` für LZMA: kleiner, aber deutlich langsamer).
 
 Der Starter (`app/launcher.sh`) prüft Rosetta, kopiert beim ersten Start den Prefix, benennt das

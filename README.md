@@ -5,6 +5,26 @@ Apple Silicon. Solid Edge läuft als Windows-Programm in Wine, Wine selbst als x
 Alles läuft auf der GPU: Oberfläche (Direct2D/Direct3D) über DXVK → MoltenVK → Metal, 3D-Ansicht (OpenGL) über
 Mesa-Zink → Vulkan → MoltenVK → Metal.
 
+## Schnellstart
+
+Du brauchst einen Mac mit Apple Silicon, [Homebrew](https://brew.sh) und ~60 GB freien Speicher.
+
+1. Den Installer **„Solid Edge Community Edition“** bei
+   [Siemens](https://resources.sw.siemens.com/en-US/download-solid-edge-community-edition) herunterladen
+   (kostenlose Registrierung, `Solid_Edge_Community_2026_….zip`, ~5 GB) und in `~/Downloads` liegen lassen.
+2. Im Terminal:
+   ```bash
+   git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --app
+   ```
+3. Warten (~1–1,5 h, das meiste ist .NET Framework). Danach „Solid Edge 2026“ im Ordner Programme starten.
+
+`setup.sh` prüft Rosetta 2, installiert `winetricks` und `p7zip`, lädt Wine, DXVK, Mesa und die zwei fertig
+gebauten eigenen DLLs (Prüfsummen werden kontrolliert), installiert Solid Edge still und richtet alles ein.
+Mehrfach aufrufbar – erledigte Schritte werden übersprungen. Optionen: `./setup.sh --help`
+(`--dmg` für eine DMG für weitere eigene Macs, `--selbst-bauen` um die DLLs aus dem Quelltext zu bauen).
+
+Die ausführliche Anleitung mit allen Hintergründen steht in [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md).
+
 ## Stand (02.11.2026)
 
 Funktioniert: Installation, Start, Menüband mit allen Symbolen, 3D-Ansicht auf der GPU, Ansichtswürfel mit

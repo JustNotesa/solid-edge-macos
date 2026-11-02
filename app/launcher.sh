@@ -277,6 +277,15 @@ elif [ "$NOETIG" = 1 ]; then
   fi
 fi
 [ "$NOETIG" = 0 ] && ordner_verknuepfen "$PREFIX"   # schnell, wenn alles stimmt
+
+# Dock-Name: Info.plist im Ordner des Wine-Laders (lib/wine/x86_64-unix – dort startet sich Wine immer neu) macht ihn
+# für macOS zu einem flachen App-Bundle → Dock, Cmd-Tab und Menüleiste zeigen „Solid Edge 2026“ statt „wine“.
+# build-dmg.sh legt sie schon in den Inhalt; hier für Wine aus älteren Inhalten nachtragen bzw. angleichen.
+LADER="$RES/wine/lib/wine/x86_64-unix"
+if [ -f "$RES/Wine-Info.plist" ] && [ -w "$LADER" ] && ! cmp -s "$RES/Wine-Info.plist" "$LADER/Info.plist"; then
+  cp "$RES/Wine-Info.plist" "$LADER/Info.plist" && echo "Dock-Name eingetragen: $LADER/Info.plist"
+  if [ -f "$RES/AppIcon.icns" ]; then cp "$RES/AppIcon.icns" "$LADER/AppIcon.icns" || true; fi
+fi
 [ -n "${SE_NUR_EINRICHTEN:-}" ] && { echo "Eingerichtet ($MODUS)."; exit 0; }
 
 export PATH="$WINE_BIN:$PATH"

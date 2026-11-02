@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 ROOT="$PWD"
 
-RELEASE="https://github.com/JustNotesa/solid-edge-macos/releases/download/v1.0"
+RELEASE="https://github.com/JustNotesa/solid-edge-macos/releases/latest/download"   # immer das neueste Release
 WINE_URL="https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.18/wine-staging-11.18-osx64.tar.xz"
 DXVK_NAME="dxvk-macOS-async-v1.10.3-20230507"
 DXVK_URL="https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507/$DXVK_NAME.tar.gz"

@@ -230,7 +230,7 @@ elif [ "$NOETIG" = 1 ]; then
     if [ "$VERSCHIEBEN" = 1 ]; then
       schritt "Windows-Umgebung mit Solid Edge übernehmen (nur beim ersten Start)"
     else
-      schritt "Windows-Umgebung mit Solid Edge kopieren (~13 GB, nur beim ersten Start, einige Minuten)"
+      schritt "Windows-Umgebung mit Solid Edge aus der DMG kopieren (~13 GB, nur beim ersten Start, einige Minuten) – die DMG bis dahin geöffnet lassen"
     fi
     uebernehmen "$QUELLE/prefix" "$PREFIX"
     chmod -R u+w "$PREFIX.tmp"

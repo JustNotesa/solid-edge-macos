@@ -1,10 +1,10 @@
 // Wartefenster für den Start von Solid Edge:
 //   osascript -l JavaScript warten.js <pid> <titel> <status-datei> <log-datei> [<wahl-datei>]
 // Zeigt die Schritte des Starters (Zeilen aus der Status-Datei) und die letzten Zeilen der laufenden Ausgabe
-// (start.log), damit man sieht, dass noch etwas passiert. Schließt sich, sobald der Prozess <pid> (nach dem exec des
-// Starters: Edge.exe) ein großes Fenster zeigt (also Solid Edges eigenen Startbildschirm), der Prozess endet oder nach
-// 15 Minuten.
-// Mit <wahl-datei> (erster Start, Modus noch offen) zeigt das Fenster zuerst die Wahl „Installiert“/„Portabel“ und
+// (start.log), damit man sieht, dass noch etwas passiert. Sobald der Prozess <pid> (nach dem exec des Starters:
+// Edge.exe) seinen Startbildschirm zeigt, legt es sich dahinter; es schließt sich, wenn das Hauptfenster erscheint,
+// der Prozess endet oder nach 15 Minuten.
+// Mit <wahl-datei> (erster Start, Modus noch offen) fragt das Fenster zuerst per Dialog „Installiert“/„Portabel“ und
 // schreibt die Antwort (installiert, portabel oder abbrechen) in diese Datei; der Starter wartet darauf. Die Dateien
 // liegen dann in einem Zwischenordner, den das Fenster am Ende wegräumt.
 ObjC.import('Cocoa');
@@ -14,7 +14,6 @@ const SA = Application.currentApplication();
 SA.includeStandardAdditions = true;
 
 const B = 560, H = 360;
-let gewaehlt = '';   // Antwort aus der Wahl
 
 
 function run(argv) {
@@ -29,28 +28,23 @@ function run(argv) {
 
   const f = fensterBauen(titel);
   if (wahlDatei) {
-    app.finishLaunching;   // nur für die Wahl nötig (Tastatur, Standardknopf) – kostet sonst Zeit
-    f.fortschritt.hidden = true;
-    const w = wahlBauen(f.win.contentView);
-    f.win.defaultButtonCell = w.weiter.cell;
-    f.win.makeKeyAndOrderFront(null);
-    app.activateIgnoringOtherApps(true);
-    const fm = $.NSFileManager.defaultManager;
-    let antwort = '';
-    while (!gewaehlt) {
-      ereignisse(app, 0.25);
-      if (!prozessLebt(pid)) break;
-      // Antwort von außen (Tests): Datei schon geschrieben → übernehmen
-      if (fm.fileExistsAtPath(wahlDatei)) { antwort = lesen(wahlDatei, 1).trim(); break; }
-    }
-    if (!antwort) {
-      antwort = 'abbrechen';
-      if (gewaehlt === 'weiter') antwort = w.portabel.state === $.NSControlStateValueOn ? 'portabel' : 'installiert';
-      $(antwort).writeToFileAtomicallyEncodingError(wahlDatei, true, $.NSUTF8StringEncoding, null);
-    }
-    w.ansicht.removeFromSuperview;
-    f.fortschritt.hidden = false;
-    if (antwort !== 'installiert' && antwort !== 'portabel') { f.win.close; aufraeumen(statusDatei, logDatei, wahlDatei); return; }
+    // Wahl als normaler macOS-Dialog (StandardAdditions): zuverlässig anklickbar. Kein Standardknopf – keine der beiden
+    // Varianten wird hervorgehoben; Esc = Abbrechen.
+    // Das Wartefenster steht dahinter und zeigt solange „Warte auf deine Auswahl“.
+    f.schritte.stringValue = lesen(statusDatei, 1) + '\n⏳  Warte auf deine Auswahl: Installiert oder Portabel';
+    f.win.orderFrontRegardless;
+    let antwort = 'abbrechen';
+    try {
+      SA.activate();
+      const r = SA.displayDialog(WAHL_TEXT, {
+        withTitle: 'Solid Edge 2026 – Einrichtung',
+        buttons: ['Abbrechen', 'Portabel', 'Installiert'],
+        cancelButton: 'Abbrechen', withIcon: 'note'
+      });
+      antwort = r.buttonReturned === 'Portabel' ? 'portabel' : 'installiert';
+    } catch (e) { antwort = 'abbrechen'; }   // Abbrechen/Esc wirft einen Fehler
+    $(antwort).writeToFileAtomicallyEncodingError(wahlDatei, true, $.NSUTF8StringEncoding, null);
+    if (antwort === 'abbrechen') { f.win.close; aufraeumen(statusDatei, logDatei, wahlDatei); return; }
   } else {
     f.win.orderFrontRegardless;
   }
@@ -58,6 +52,7 @@ function run(argv) {
   const start = Date.now();
   const ende = start + 15 * 60 * 1000;
   let letzteAusgabe = '';
+  let startbild = 0;   // Fensternummer von Solid Edges Startbildschirm
   while (Date.now() < ende) {
     ereignisse(app, 0.5);
     const s = Math.round((Date.now() - start) / 1000);
@@ -70,7 +65,23 @@ function run(argv) {
       letzteAusgabe = ausgabe;
     }
     if (!prozessLebt(pid)) break;
-    if (hatFenster(pid)) break;
+    // Erstes großes Fenster = Startbildschirm. Wine zeigt es erst einige Sekunden leer (unsichtbar) an, bevor es
+    // gezeichnet ist – das Wartefenster schließt deshalb noch nicht, sondern legt sich direkt dahinter: Solange der
+    // Startbildschirm leer ist, sieht man das Wartefenster, danach deckt er es zu. Erst wenn ein weiteres Fenster
+    // erscheint (Solid Edges Hauptfenster) oder der Startbildschirm wieder verschwindet, schließt es sich.
+    const fenster = grosseFenster(pid);
+    const nummern = fenster.map(w => w.nummer);
+    if (!startbild && fenster.length) {
+      startbild = fenster[0].nummer;
+      // mittig hinter den Startbildschirm (CG-Koordinaten: Ursprung oben links, Cocoa: unten links)
+      const b = fenster[0].rahmen, hoehe = $.NSScreen.screens.objectAtIndex(0).frame.size.height;
+      if (b.Width >= B && b.Height >= H)
+        f.win.setFrameOrigin($.NSMakePoint(b.X + (b.Width - B) / 2, hoehe - (b.Y + (b.Height - H) / 2) - H));
+      f.win.level = $.NSNormalWindowLevel;
+      f.win.orderWindowRelativeTo($.NSWindowBelow, startbild);
+    } else if (startbild && (nummern.some(n => n !== startbild) || nummern.indexOf(startbild) < 0)) {
+      break;
+    }
   }
   f.win.close;
   if (wahlDatei) aufraeumen(statusDatei, logDatei, wahlDatei);
@@ -124,67 +135,14 @@ function fensterBauen(titel) {
   return { win: win, fortschritt: v, zeit: zeit, schritte: schritte, tv: tv };
 }
 
-// Wahl „Installiert“/„Portabel“ als eigene Ebene (der Fortschritt ist solange versteckt).
-function wahlBauen(v) {
-  // Ziel für die Knöpfe (Tag 1 = Weiter, 2 = Abbrechen). Erst hier registrieren: unter Rosetta (x86_64-osascript)
-  // hängt registerSubclass endlos – der Starter startet das Fenster deshalb nativ.
-  if (!$.SEWahlZiel) ObjC.registerSubclass({
-    name: 'SEWahlZiel',
-    methods: {
-      'knopf:': {
-        types: ['void', ['id']],
-        implementation: function (sender) { gewaehlt = Number(sender.tag) === 1 ? 'weiter' : 'abbrechen'; }
-      },
-      'auswahl:': { types: ['void', ['id']], implementation: function (sender) {} }
-    }
-  });
-  const ansicht = $.NSView.alloc.initWithFrame($.NSMakeRect(0, 0, B, H));
-  const ziel = $.SEWahlZiel.alloc.init;
-  let y = H - 44;
-
-  const kopf = $.NSTextField.labelWithString('Wie soll Solid Edge eingerichtet werden?');
-  kopf.frame = $.NSMakeRect(24, y, B - 48, 22);
-  kopf.font = $.NSFont.boldSystemFontOfSize(15);
-  ansicht.addSubview(kopf);
-
-  function option(titelText, erklaerung, oben, hoehe) {
-    const r = $.NSButton.radioButtonWithTitleTargetAction(titelText, ziel, 'auswahl:');
-    r.frame = $.NSMakeRect(24, oben - 20, B - 48, 20);
-    r.font = $.NSFont.boldSystemFontOfSize(13);
-    ansicht.addSubview(r);
-    const t = $.NSTextField.wrappingLabelWithString(erklaerung);
-    t.frame = $.NSMakeRect(44, oben - 24 - hoehe, B - 68, hoehe);
-    t.font = $.NSFont.systemFontOfSize(11.5);
-    t.textColor = $.NSColor.secondaryLabelColor;
-    ansicht.addSubview(t);
-    return r;
-  }
-  y -= 18;
-  const installiert = option('Installiert (empfohlen)',
-    'Wine kommt in die App, die Windows-Umgebung mit deinen Solid-Edge-Einstellungen nach ' +
-    '~/Library/Application Support/SolidEdge2026. Ein Update der App behält die Einstellungen. ' +
-    'Zum Entfernen legt Solid Edge „Solid Edge deinstallieren“ neben die App.', y, 46);
-  y -= 24 + 46 + 14;
-  const portabel = option('Portabel',
-    'Alles kommt in die App, außerhalb bleibt nichts – App löschen = alles weg. ' +
-    'Ein Update der App setzt die Solid-Edge-Einstellungen zurück. Die Zeichnungen in den Mac-Ordnern bleiben. ' +
-    'Nach dem Kopieren auf einen anderen Mac dauert der erste Start lange (macOS prüft dann die ganzen 13 GB).', y, 62);
-  installiert.state = $.NSControlStateValueOn;
-
-  const weiter = $.NSButton.buttonWithTitleTargetAction('Weiter', ziel, 'knopf:');
-  weiter.tag = 1;
-  weiter.keyEquivalent = '\r';
-  weiter.frame = $.NSMakeRect(B - 24 - 110, 18, 110, 32);
-  ansicht.addSubview(weiter);
-  const abbrechen = $.NSButton.buttonWithTitleTargetAction('Abbrechen', ziel, 'knopf:');
-  abbrechen.tag = 2;
-  abbrechen.keyEquivalent = '\x1b';
-  abbrechen.frame = $.NSMakeRect(B - 24 - 110 - 8 - 110, 18, 110, 32);
-  ansicht.addSubview(abbrechen);
-
-  v.addSubview(ansicht);
-  return { ansicht: ansicht, installiert: installiert, portabel: portabel, weiter: weiter, abbrechen: abbrechen };
-}
+const WAHL_TEXT =
+  'Wie soll Solid Edge eingerichtet werden?\n\n' +
+  'INSTALLIERT\nWine kommt in die App, die Windows-Umgebung mit deinen Solid-Edge-Einstellungen nach ' +
+  '~/Library/Application Support/SolidEdge2026. Ein Update der App behält die Einstellungen. ' +
+  'Zum Entfernen liegt „Solid Edge deinstallieren“ neben der App.\n\n' +
+  'PORTABEL\nAlles kommt in die App, außerhalb bleibt nichts – App löschen = alles weg. ' +
+  'Ein Update der App setzt die Solid-Edge-Einstellungen zurück. Die Zeichnungen in den Mac-Ordnern bleiben. ' +
+  'Nach dem Kopieren auf einen anderen Mac dauert der erste Start lange (macOS prüft dann die ganzen 13 GB).';
 
 // Ereignisse (Klicks, Tasten) abarbeiten, bis zu <sek> Sekunden warten.
 function ereignisse(app, sek) {
@@ -218,13 +176,15 @@ function prozessLebt(pid) {
   try { SA.doShellScript('kill -0 ' + pid); return true; } catch (e) { return false; }
 }
 
-function hatFenster(pid) {
+// Sichtbare, große Fenster (≥ 300×150, normale Ebene) des Prozesses <pid>: [{nummer, rahmen}].
+function grosseFenster(pid) {
   const ref = $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly | $.kCGWindowListExcludeDesktopElements, $.kCGNullWindowID);
   const liste = ObjC.deepUnwrap(ObjC.castRefToObject(ref)) || [];
+  const nummern = [];
   for (const w of liste) {
     if (w.kCGWindowOwnerPID !== pid || w.kCGWindowLayer !== 0) continue;
     const b = w.kCGWindowBounds || {};
-    if ((b.Width || 0) >= 300 && (b.Height || 0) >= 150) return true;
+    if ((b.Width || 0) >= 300 && (b.Height || 0) >= 150) nummern.push({ nummer: w.kCGWindowNumber, rahmen: b });
   }
-  return false;
+  return nummern;
 }

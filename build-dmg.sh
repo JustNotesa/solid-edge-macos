@@ -92,6 +92,20 @@ fi
 
 step "Link auf /Programme"
 ln -s /Applications "$STAGE/Applications"
+# Hinweis im DMG-Fenster: Der erste Start kopiert den Inhalt aus der DMG – sie muss dabei geöffnet bleiben.
+cat > "$STAGE/Bitte lesen – DMG beim ersten Start geöffnet lassen.txt" <<'TXT'
+Solid Edge 2026 für den Mac
+
+1. „Solid Edge 2026“ in den Ordner „Programme“ (Applications) ziehen.
+2. Diese DMG GEÖFFNET LASSEN und Solid Edge aus „Programme“ starten
+   (beim allerersten Mal: Rechtsklick auf die App → „Öffnen“).
+3. Beim ersten Start wählst du „Installiert“ oder „Portabel“. Danach kopiert Solid Edge
+   die Windows-Umgebung (~13 GB) aus dieser DMG – das dauert einige Minuten,
+   ein Fenster zeigt den Fortschritt.
+4. Sobald Solid Edge läuft, kann die DMG ausgeworfen werden.
+
+Voraussetzung: Rosetta 2 (im Terminal: softwareupdate --install-rosetta).
+TXT
 
 step "DMG bauen ($FORMAT) – dauert"
 mkdir -p "$DIST"

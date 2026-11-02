@@ -51,14 +51,10 @@ cp "$SE_ROOT/app/Deinstallieren-Info.plist" "$D/Contents/Info.plist"
 
 step "Wine-Runtime übernehmen (APFS-Klon)"
 cp -cR "$SE_ROOT/runtime/Wine Staging.app/Contents/Resources/wine" "$INHALT/wine"
-# Dock-Name: Wines ntdll startet sich immer als lib/wine/x86_64-unix/wine neu (Ordner per realpath von ntdll.so).
-# Eine Info.plist in diesem Ordner macht ihn für macOS zu einem flachen App-Bundle → Dock, Cmd-Tab und Menüleiste
-# zeigen „Solid Edge 2026“ statt „wine“ (Symbol dazu). Die Vorlage kommt auch in die App: der Starter trägt sie bei
-# Wine aus älteren Inhalten nach.
-LADER="$INHALT/wine/lib/wine/x86_64-unix"
-cp "$SE_ROOT/app/Wine-Info.plist" "$LADER/Info.plist"
-cp "$SE_ROOT/app/Wine-Info.plist" "$APP/Contents/Resources/Wine-Info.plist"
-[ -f "$APP/Contents/Resources/AppIcon.icns" ] && cp "$APP/Contents/Resources/AppIcon.icns" "$LADER/AppIcon.icns"
+# Dock-Name „Solid Edge 2026“ statt „wine“ (Begründung in app/wine-umbenennen.sh). Skript und Vorlage kommen auch in
+# die App: der Starter stellt damit Wine aus älteren Inhalten um.
+cp "$SE_ROOT/app/Wine-Info.plist" "$SE_ROOT/app/wine-umbenennen.sh" "$APP/Contents/Resources/"
+"$SE_ROOT/app/wine-umbenennen.sh" "$INHALT/wine" "$SE_ROOT/app/Wine-Info.plist" "$APP/Contents/Resources/AppIcon.icns"
 
 step "Prefix als Vorlage übernehmen (APFS-Klon) und aufräumen"
 cp -cR "$WINEPREFIX" "$INHALT/prefix"

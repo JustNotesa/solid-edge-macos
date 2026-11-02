@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Kommt als Info.plist nach wine/lib/wine/x86_64-unix (build-dmg.sh, launcher.sh). Damit gilt der Ordner für macOS
-     als (flaches) App-Bundle mit dem Wine-Lader „wine“ als Programm: Dock, Cmd-Tab und Menüleiste zeigen „Solid Edge
-     2026“ statt „wine“. Inhalt sonst wie Wines eingebettete Info.plist (Abschnitt __TEXT,__info_plist im Lader).
+<!-- Kommt als Info.plist nach wine/lib/wine/Solid Edge 2026.app (früher x86_64-unix; app/wine-umbenennen.sh). Damit
+     gilt der Ordner für macOS als (flaches) App-Bundle mit dem Wine-Lader „wine“ als Programm: Dock, Cmd-Tab und
+     Menüleiste zeigen „Solid Edge 2026“ statt „wine“. Inhalt sonst wie Wines eingebettete Info.plist (Abschnitt __TEXT,__info_plist im Lader).
      Eigene Kennung (nicht die der App), damit macOS beim Öffnen per Kennung nicht den Wine-Ordner startet. -->
 <plist version="1.0">
 <dict>

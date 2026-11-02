@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Solid Edge deinstallieren</string>
+	<key>CFBundleDisplayName</key>
+	<string>Solid Edge deinstallieren</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.wine.solidedge2026.deinstallieren</string>
+	<key>CFBundleVersion</key>
+	<string>226.00.01004</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2026</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleExecutable</key>
+	<string>deinstallieren</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Solid Edge deinstallieren bittet den Finder, Solid Edge 2026 und seinen Arbeitsordner in den Papierkorb zu legen.</string>
+</dict>
+</plist>

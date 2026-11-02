@@ -70,7 +70,10 @@ echo "Erzeuge Header …"
 
 # 4. Übersetzen (Wines eigene CRT-Header, gelinkt gegen ucrtbase wie Wines PE-Builds)
 CFLAGS="-O2 -nostdinc -I$W/include/msvcrt -I$W/include -I$W/dlls/d2d1 -D__WINESRC__ -D_UCRT -fno-builtin
-  -fshort-wchar -fno-strict-aliasing -fno-omit-frame-pointer -Wall -Wno-attributes -Wno-unused -Wno-format"
+  -fshort-wchar -fno-strict-aliasing -fno-omit-frame-pointer -Wall -Wno-attributes -Wno-unused -Wno-format
+  -ffile-prefix-map=$W=wine-$WINE_VER"
+# -ffile-prefix-map: __FILE__ (assert-Meldungen, Namen der Critical Sections) enthielte sonst den absoluten
+# Bau-Pfad samt Mac-Benutzernamen → wird zu wine-11.21/dlls/d2d1/….c. Debuginfo entfernt das -s beim Linken.
 OBJ="$ARBEIT/obj"; mkdir -p "$OBJ"
 echo "Übersetze …"
 for f in "$W"/dlls/d2d1/*.c; do
@@ -92,6 +95,10 @@ x86_64-w64-mingw32-dlltool -d "$OBJ/d3d10_1.def" -l "$OBJ/libd3d10_1.a"
 $NIEDRIG $CC -shared -s -o "$AUS/d2d1.dll" "$OBJ"/*.o "$OBJ/d2d1.def" -L"$OBJ" -lwinedbg -ld3d10_1 \
   -lgdi32 -luser32 -ladvapi32 -ld3dcompiler_47 -ldwrite -lxmllite -lole32 -lkernel32 -lucrtbase -static-libgcc
 rm -rf "$ARBEIT"
+# Keine lokalen Pfade/Benutzernamen in der verteilten DLL (LC_ALL=C + /usr/bin/grep: ugrep zählt Binärdateien falsch)
+if LC_ALL=C /usr/bin/grep -a -q -e "$HOME" -e "$SE_ROOT" -e '/Users/' "$AUS/d2d1.dll"; then
+  echo "Fehler: $AUS/d2d1.dll enthält lokale Pfade" >&2; exit 1
+fi
 echo "Fertig: $AUS/d2d1.dll"
 
 if [ "${1:-}" = "--install" ]; then

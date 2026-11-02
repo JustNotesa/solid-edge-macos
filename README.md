@@ -13,12 +13,15 @@ Terminal öffnen (Programme → Dienstprogramme → Terminal), diese Zeile einf�
 curl -fsSL https://raw.githubusercontent.com/JustNotesa/solid-edge-macos/main/install-online.sh | bash
 ```
 
-Mehr ist nicht zu tun – außer einer Sache, die das Skript dir zeigt:
+Mehr ist nicht zu tun – außer zwei Dingen, die das Skript dir zeigt:
 
-1. Es öffnet die **Siemens-Seite**. Dort kostenlos registrieren und **„Solid Edge Community Edition“**
+1. Es fragt, wie Solid Edge eingerichtet wird: **Installiert** (Enter, empfohlen – Einstellungen bleiben bei
+   Updates, zum Entfernen gibt es „Solid Edge deinstallieren“) oder **Portabel** (alles steckt in der App, App
+   löschen = alles weg).
+2. Es öffnet die **Siemens-Seite**. Dort kostenlos registrieren und **„Solid Edge Community Edition“**
    herunterladen (`Solid_Edge_Community_2026_….zip`, ~5 GB). Die Datei einfach in **Downloads** lassen.
-2. Das Terminal wartet, bis der Download fertig ist, und macht dann allein weiter (~30 Minuten).
-3. Am Ende liegt **„Solid Edge 2026“ im Ordner Programme** und startet automatisch.
+3. Das Terminal wartet, bis der Download fertig ist, und macht dann allein weiter (~30 Minuten).
+4. Am Ende liegt **„Solid Edge 2026“ im Ordner Programme** und startet automatisch.
 
 Ggf. fragt das Skript einmal nach deinem Mac-Passwort (für Homebrew bzw. Rosetta 2, falls noch nicht vorhanden).
 Voraussetzungen: Mac mit Apple Silicon, ~40 GB freier Speicher während der Installation (danach ~15 GB).
@@ -56,7 +59,7 @@ Mac-Ordner, DMG für andere Macs. Bekannte Lücke: Startseite („Starten“/„
 | `setup.sh` | Einrichtung: Prüfungen, Downloads, DLLs (Release oder `--selbst-bauen`), Installation, App/DMG |
 | `install.sh`, `install-opengl.sh`, `install-webview2.sh`, `set-standard.sh` | die eigentliche Installation in den Wine-Prefix |
 | `env.sh`, `start.sh` | Umgebung, Start ohne App |
-| `app/` (`launcher.sh`, `Info.plist`, `prefix-anonymisieren.py`), `build-dmg.sh` | App-Bundle und DMG |
+| `app/` (`launcher.sh`, `warten.js`, `deinstallieren.sh`, `Info.plist`, `Deinstallieren-Info.plist`, `prefix-anonymisieren.py`, `icon-erzeugen.sh`), `build-dmg.sh` | App-Bundle (klein ausgeliefert; Wine und Prefix kommen beim ersten Start dazu, installiert oder portabel), Deinstallations-App und DMG |
 | `opengl-wrapper/` | eigene opengl32-Vorschaltung vor Mesa (Quelltext, `build.sh`, Tests) |
 | `d2d1-build/` | eigene d2d1.dll aus Wine-11.21-Quellen + Patches |
 | `patches/` | kleine Byte-Patches (Mesa `sampler`, d2d1-Freigabe-Reihenfolge) |
@@ -78,6 +81,8 @@ git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-ma
 - `./setup.sh --app` legt zusätzlich die App nach /Programme, `--dmg` baut eine DMG für weitere eigene Macs
   (persönliche Daten werden entfernt; **nicht öffentlich weitergeben** – sie enthält Solid Edge und die Lizenz),
   `--selbst-bauen` baut die zwei DLLs aus dem Quelltext (braucht `brew install mingw-w64`).
+- Modus der App: `--app` fragt im Terminal (Enter = Installiert); `--installiert` bzw. `--portabel` (schließen
+  `--app` ein) legen ihn ohne Rückfrage fest. Details: [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md) Abschnitt 2.
 - Dateien öffnen/speichern: Im Solid-Edge-Dialog „Dokumente“, „Desktop“ oder „Downloads“ (= gleichnamige
   Mac-Ordner) oder über `Z:\Users\<name>\…` beliebige Orte.
 - Ausführlich: [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md).

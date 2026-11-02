@@ -2,7 +2,9 @@
 # Richtet Solid Edge 2026 Community Edition auf diesem Mac ein – ein Befehl, alles automatisch.
 #
 #   ./setup.sh                 einrichten, danach mit ./start.sh starten
-#   ./setup.sh --app           zusätzlich „Solid Edge 2026.app“ unter /Programme anlegen (Start per Doppelklick)
+#   ./setup.sh --app           zusätzlich „Solid Edge 2026.app“ unter /Programme anlegen (Start per Doppelklick);
+#                              fragt nach dem Modus: installiert (Standard) oder portabel (alles in der App)
+#   ./setup.sh --installiert   bzw. --portabel: wie --app, Modus ohne Rückfrage
 #   ./setup.sh --dmg           zusätzlich eine DMG für weitere eigene Macs bauen (nicht öffentlich weitergeben!)
 #   ./setup.sh --selbst-bauen  die zwei eigenen DLLs aus dem Quelltext bauen statt sie aus dem GitHub-Release zu laden
 #   ./setup.sh --aufraeumen    nach --app Bau-Dateien löschen (Installer-Kopie, Laufzeiten, Prefix; die App bleibt)
@@ -22,7 +24,8 @@ DXVK_NAME="dxvk-macOS-async-v1.10.3-20230507"
 DXVK_URL="https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507/$DXVK_NAME.tar.gz"
 SIEMENS_URL="https://resources.sw.siemens.com/en-US/download-solid-edge-community-edition"
 
-APP=0; DMG=0; SELBST=0; AUFRAEUMEN=0; STARTEN=0
+APP=0; DMG=0; SELBST=0; AUFRAEUMEN=0; STARTEN=0; MODUS=""
+DATA="${SE_DATA_DIR:-$HOME/Library/Application Support/SolidEdge2026}"   # Arbeitsordner der App (Modus installiert)
 for a in "$@"; do
   case "$a" in
     --app) APP=1 ;;
@@ -30,7 +33,9 @@ for a in "$@"; do
     --selbst-bauen) SELBST=1 ;;
     --aufraeumen) AUFRAEUMEN=1 ;;
     --starten) STARTEN=1 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    --installiert) MODUS=installiert; APP=1 ;;
+    --portabel) MODUS=portabel; APP=1 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $a (siehe ./setup.sh --help)" >&2; exit 2 ;;
   esac
 done
@@ -44,6 +49,32 @@ laden()   { # laden <url> <ziel>
 }
 
 mkdir -p downloads runtime logs
+
+# ---------------------------------------------------------------- Modus der App (gleich am Anfang fragen, danach läuft
+# alles ohne dich durch)
+if [ "$APP" = 1 ] && [ -z "$MODUS" ]; then
+  if [ -f "$DATA/prefix/.se-ready" ]; then
+    MODUS=installiert   # bestehende Installation: Update, Einstellungen bleiben
+  elif [ -t 0 ]; then
+    cat <<FRAGE
+
+    Wie soll die App eingerichtet werden?
+      1) Installiert (empfohlen): Wine kommt in die App, die Windows-Umgebung mit deinen Solid-Edge-Einstellungen
+         nach ~/Library/Application Support/SolidEdge2026. Ein Update der App behält die Einstellungen.
+         Zum Entfernen liegt „Solid Edge deinstallieren“ neben der App.
+      2) Portabel: alles kommt in die App, außerhalb bleibt nichts – App löschen = alles weg.
+         Ein Update der App setzt die Solid-Edge-Einstellungen zurück. Die Zeichnungen in den Mac-Ordnern bleiben.
+         Nach dem Kopieren auf einen anderen Mac dauert der erste Start lange (macOS prüft dann die ganzen 13 GB).
+FRAGE
+    while :; do
+      printf '    Auswahl [1]: '
+      read -r a || a=""
+      case "$a" in ""|1|i|I|installiert) MODUS=installiert; break ;; 2|p|P|portabel) MODUS=portabel; break ;; esac
+    done
+  else
+    MODUS=installiert
+  fi
+fi
 
 # ---------------------------------------------------------------- 1. Mac prüfen
 schritt "Mac prüfen"
@@ -171,10 +202,37 @@ fi
 APP_PFAD=""
 for d in ${SE_APP_ZIEL:+"$SE_APP_ZIEL"} /Applications "$HOME/Applications"; do [ -d "$d/Solid Edge 2026.app" ] && { APP_PFAD="$d/Solid Edge 2026.app"; break; }; done
 
-if [ -n "$APP_PFAD" ] && [ ! -f "$HOME/Library/Application Support/SolidEdge2026/prefix/.se-ready" ]; then
-  schritt "Arbeitsordner der App einrichten (sonst passiert das beim ersten Start)"
-  SE_NUR_EINRICHTEN=1 "$APP_PFAD/Contents/MacOS/SolidEdge2026"
-  ok "~/Library/Application Support/SolidEdge2026"
+# build-dmg.sh --app legt Wine und die Windows-Umgebung nach …/SolidEdge2026/neu; hier gleich übernehmen (sonst
+# passiert das beim ersten Start). Die App dafür über macOS öffnen (open), nicht den Starter direkt ausführen: so
+# prüft macOS sie beim ersten Öffnen, solange sie noch klein ist – erst danach kommt der Inhalt ins Bundle.
+if [ -n "$APP_PFAD" ] && [ -d "$DATA/neu" ]; then
+  MODUS="${MODUS:-installiert}"
+  schritt "App einrichten (Modus: $MODUS)"
+  if [ "$MODUS" = portabel ]; then
+    [ -f "$DATA/prefix/.se-ready" ] && echo "    Hinweis: die bisherige Windows-Umgebung in $DATA bleibt liegen (nicht mehr gebraucht)."
+    ARBEIT="$APP_PFAD/Contents/Resources/inhalt"
+  else
+    ARBEIT="$DATA"
+  fi
+  # start.log der App mitlesen, damit man im Terminal sieht, was passiert.
+  mitlesen() {
+    local n=0 z
+    [ -f "$1" ] && n=$(wc -l < "$1")
+    while :; do
+      if [ -f "$1" ] && z=$(wc -l < "$1") && [ "$z" -gt "$n" ]; then
+        tail -n +$((n + 1)) "$1" | head -n $((z - n)) | sed 's/^/    /'; n=$z
+      fi
+      sleep 1
+    done
+  }
+  mitlesen "$ARBEIT/start.log" & MITLESEN=$!
+  open -n -W --env SE_NUR_EINRICHTEN=1 --env SE_MODUS="$MODUS" ${SE_DATA_DIR:+--env SE_DATA_DIR="$SE_DATA_DIR"} "$APP_PFAD" \
+    || true
+  sleep 1.2; kill "$MITLESEN" 2>/dev/null; wait "$MITLESEN" 2>/dev/null || true
+  [ -x "$APP_PFAD/Contents/Resources/wine/bin/wine" ] && [ -f "$ARBEIT/prefix/.se-ready" ] \
+    || fehler "Einrichten der App fehlgeschlagen – siehe $ARBEIT/start.log"
+  if [ "$MODUS" = portabel ]; then ok "alles in $APP_PFAD"
+  else ok "Wine in der App, Windows-Umgebung in $DATA, „Solid Edge deinstallieren“ neben der App"; fi
 fi
 
 if [ "$AUFRAEUMEN" = 1 ] && [ -n "$APP_PFAD" ]; then
@@ -186,8 +244,7 @@ fi
 schritt "Fertig"
 if [ "$STARTEN" = 1 ]; then
   if [ -n "$APP_PFAD" ]; then open "$APP_PFAD"; else (./start.sh </dev/null >/dev/null 2>&1 &); fi
-  echo "    Solid Edge startet. Beim allerersten Öffnen prüft macOS die App – das kann ein bis zwei Minuten dauern,"
-  echo "    erst danach erscheint das Wartefenster und kurz darauf Solid Edge."
+  echo "    Solid Edge startet: erst ein kleines Fenster mit dem Fortschritt, dann Solid Edges Startbildschirm."
 fi
 cat <<EOF
     Solid Edge starten:   $([ -n "$APP_PFAD" ] && echo "„Solid Edge 2026“ im Ordner Programme" || echo "./start.sh")

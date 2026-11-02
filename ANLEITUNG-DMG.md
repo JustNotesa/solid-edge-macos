@@ -51,10 +51,39 @@ Schritt für Schritt beschrieben, die zugehörigen Skripte und Patches liegen in
 
 - **„Solid Edge 2026“ im Ordner Programme**, startbar per Doppelklick wie jedes Mac-Programm (kein „Rechtsklick →
   Öffnen“ nötig, weil die App auf deinem Mac gebaut wird).
-- Die App bringt alles mit: Wine, Grafik-Bibliotheken und einen fertig eingerichteten „Windows“-Ordner (Prefix)
-  mit Solid Edge. Beim ersten Start legt sie ihren Arbeitsordner unter `~/Library/Application Support/SolidEdge2026`
-  an (APFS-Klon, fast ohne zusätzlichen Platz) und stellt ihn auf deinen Benutzer um (Ordner Dokumente/Schreibtisch/
-  Downloads, Laufwerk `Z:` = Mac-Festplatte).
+- Die App wird **klein ausgeliefert** (Starter, Wartefenster, Symbol, Deinstallations-App). Grund: macOS prüft beim
+  allerersten Öffnen jedes Byte im App-Bundle, ohne irgendetwas anzuzeigen – leer 0,5 s, mit Wine 5 s, mit 13 GB
+  77 s. Was nach dem ersten Start ins Bundle kommt, wird nicht erneut geprüft (auch nicht nach dem Verschieben);
+  eine Kopie der vollen App auf einem anderen Mac dagegen schon (über 4 Minuten).
+- Beim ersten Start erscheint sofort das Wartefenster mit Fortschritt und laufender Ausgabe, bis Solid Edges eigener
+  Startbildschirm kommt. Darin wählst du einmalig, wie Solid Edge eingerichtet wird („Weiter“/„Abbrechen“):
+
+  | | **Installiert** (empfohlen, vorausgewählt) | **Portabel** |
+  |---|---|---|
+  | Wine | in der App (`Contents/Resources/wine`) | in der App (`Contents/Resources/wine`) |
+  | „Windows“-Ordner (Prefix, mit den Solid-Edge-Einstellungen) | `~/Library/Application Support/SolidEdge2026/prefix` | in der App (`Contents/Resources/inhalt/prefix`) |
+  | `start.log`, `status.txt` | `~/Library/Application Support/SolidEdge2026/` | `Contents/Resources/inhalt/` |
+  | Update der App | Einstellungen bleiben, nur Wine und Grafik-DLLs werden erneuert | setzt die Solid-Edge-Einstellungen zurück |
+  | Entfernen | „Solid Edge deinstallieren“ (siehe unten) | App löschen – außerhalb bleibt nichts |
+
+  In beiden Fällen sind Dokumente/Schreibtisch/Downloads im Prefix die Mac-Ordner und Laufwerk `Z:` ist die
+  Mac-Festplatte. Der Windows-Benutzer heißt einfach `user` (ältere Installationen behalten ihren bisherigen Namen;
+  der Starter gibt ihn Wine beim Start über `USER`/`WINEUSERNAME` mit) – dein Mac-Name steht nicht in der
+  Windows-Umgebung. Zu Portabel steht im Fenster: „Ein Update der App setzt die
+  Solid-Edge-Einstellungen zurück. Die Zeichnungen in den Mac-Ordnern bleiben.“ und „Nach dem Kopieren auf einen
+  anderen Mac dauert der erste Start lange (macOS prüft dann die ganzen 13 GB).“ Der gewählte Modus steht in
+  `Contents/Resources/modus.txt`; `SE_MODUS=installiert|portabel` überspringt die Frage.
+- Die App muss in einem **beschreibbaren Ordner** liegen (z. B. Programme). Direkt aus der DMG oder per
+  App-Translocation (aus „Downloads“ gestartet, ohne sie zu verschieben) startet sie nicht und meldet, sie erst in
+  den Ordner Programme zu ziehen.
+- **Deinstallieren (Installiert):** Der Starter legt neben die App (meist in Programme) **„Solid Edge
+  deinstallieren“**. Sie zeigt, was entfernt wird (mit Größe), bittet ggf., Solid Edge zu beenden, und legt App,
+  Arbeitsordner und sich selbst per Finder in den Papierkorb (sonst `/usr/bin/trash`) – nichts wird endgültig
+  gelöscht, Zeichnungen in Dokumente/Schreibtisch/Downloads bleiben. Beim ersten Mal fragt macOS evtl., ob sie den
+  Finder steuern darf.
+- Ältere Installationen (Wine und Prefix in `~/Library/Application Support/SolidEdge2026`) gelten als Installiert:
+  Beim nächsten Update wandert Wine in die App, `…/SolidEdge2026/wine` verschwindet, Prefix und Einstellungen
+  bleiben, die Deinstallations-App kommt dazu.
 - Leistung auf dem Test-Mac: Start in ~30 s, ~25 Threads, ~1,7 GB Speicher, Drehen/Zoomen flüssig.
 - Optional: `SolidEdge2026-macOS.dmg` (~5,7 GB) für weitere **eigene** Macs, ohne persönliche Daten.
 
@@ -65,7 +94,7 @@ Schritt für Schritt beschrieben, die zugehörigen Skripte und Patches liegen in
 | Was | Hinweis |
 |---|---|
 | Mac mit Apple Silicon, macOS 13 oder neuer | getestet mit macOS 26 |
-| ~40 GB freier Speicher während der Installation | danach ~15 GB (App), die Bau-Dateien werden gelöscht |
+| ~40 GB freier Speicher während der Installation | danach ~15 GB (egal ob installiert oder portabel), die Bau-Dateien werden gelöscht |
 | Internet, ~1 GB Downloads + 5 GB Siemens-Installer | Wine, DXVK, Mesa, WebView2, .NET |
 | Siemens-Konto (kostenlos) | für den Download der Community Edition |
 | ~30 Minuten | das meiste ist die .NET-Installation |
@@ -117,7 +146,8 @@ curl -fsSL https://raw.githubusercontent.com/JustNotesa/solid-edge-macos/main/in
 ```
 
 1. Das Skript prüft den Mac, installiert bei Bedarf Homebrew und Rosetta 2 und lädt dieses Projekt nach
-   `~/solid-edge-macos`.
+   `~/solid-edge-macos`. Dann fragt es, ob Solid Edge **installiert** (Enter, empfohlen) oder **portabel**
+   eingerichtet wird (siehe Abschnitt 2).
 2. Es öffnet die **Siemens-Seite**: dort registrieren und „Solid Edge Community Edition“ herunterladen
    (`Solid_Edge_Community_2026_….zip`, ~5 GB). Die Datei **in „Downloads“ lassen** – das Terminal wartet, bis der
    Download fertig ist (die Größe bleibt stehen, kein `.crdownload`/`.download` mehr), und macht dann allein weiter.
@@ -128,7 +158,9 @@ Den Siemens-Download in „Downloads“ kannst du danach löschen.
 
 ### 5.2 Was dabei im Einzelnen passiert
 
-`install-online.sh` ruft `setup.sh --app --aufraeumen --starten` auf. `setup.sh` macht:
+`install-online.sh` ruft `setup.sh --app --aufraeumen --starten` auf. Mit `--app` fragt `setup.sh` zuerst im
+Terminal nach dem Modus (Enter = Installiert); `--installiert` bzw. `--portabel` legen ihn ohne Rückfrage fest, und
+liegt im Arbeitsordner schon eine Installation (`prefix/`), gilt Installiert ohne Frage. Dann macht `setup.sh`:
 
 1. **Mac prüfen:** Apple Silicon, Rosetta 2 (sonst `softwareupdate --install-rosetta`), freier Speicher.
 2. **Werkzeuge:** `brew install winetricks p7zip` (nur was fehlt).
@@ -159,10 +191,17 @@ Den Siemens-Download in „Downloads“ kannst du danach löschen.
    10. **OpenGL** (`install-opengl.sh`): Mesa 22.0.3 laden, `libgallium_wgl.dll` mit
        `patches/patch-mesa-sampler-name.py` patchen, Vorschaltung + Mesa neben `Edge.exe`, Override nur für Edge.exe.
    11. **Solid-Edge-Einstellungen:** kein IE-Startfenster, kein „Ordered/Synchronous“-Popup, DIN-Vorlagen.
-7. **App bauen** (`build-dmg.sh --app`): `app/launcher.sh` als Starter, Wine und Prefix per APFS-Klon ins Bundle,
-   persönliche Daten entfernen (`app/prefix-anonymisieren.py`), App nach /Programme.
-8. **Aufräumen** (`--aufraeumen`): Installer-Kopie, Laufzeiten, Prefix und Bau-Reste löschen – die App ist
-   eigenständig. **Starten** (`--starten`).
+7. **App bauen** (`build-dmg.sh --app`): `app/launcher.sh` als Starter, `app/warten.js` als Wartefenster und
+   `app/deinstallieren.sh` als Deinstallations-App ins Bundle; Wine und Prefix per APFS-Klon als „Inhalt“ nach
+   `…/SolidEdge2026/neu`, persönliche Daten entfernen (`app/prefix-anonymisieren.py`), App nach /Programme. App und
+   Inhalt tragen dieselbe Bau-Kennung (`stand.txt`).
+   **Voreinrichtung:** `setup.sh` startet die App einmal mit
+   `open -n -W --env SE_NUR_EINRICHTEN=1 --env SE_MODUS=…` – so prüft macOS sie, solange sie klein ist – und zeigt
+   das `start.log` im Terminal mit. Der Starter übernimmt dabei den Inhalt: Wine in die App, den Prefix je nach Modus
+   in den Arbeitsordner oder in die App (neu eingerichtet: ganzer Prefix; Update bei Installiert: nur Wine und
+   Grafik-DLLs, Einstellungen bleiben) und legt bei Installiert „Solid Edge deinstallieren“ neben die App.
+8. **Aufräumen** (`--aufraeumen`): Installer-Kopie, Laufzeiten, Projekt-Prefix und Bau-Reste löschen – Solid Edge
+   steckt danach nur noch in der App (und bei Installiert im Arbeitsordner). **Starten** (`--starten`).
 
 Ohne `--aufraeumen` (z. B. `./setup.sh --app` nach eigenem `git clone`) bleibt der Arbeits-Prefix im
 Projektordner erhalten und Solid Edge lässt sich zusätzlich mit `./start.sh` starten.
@@ -181,14 +220,23 @@ git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-ma
 ```
 
 - Ergebnis: `dist/SolidEdge2026-macOS.dmg` (LZFSE; `DMG_FORMAT=ULMO` für LZMA, kleiner, deutlich langsamer).
-- Persönliche Daten werden entfernt: Benutzername → `user` (der Starter setzt beim ersten Start den jeweiligen
-  Mac-Benutzer ein), Zuletzt-geöffnet-Listen, Registry-Einträge mit Pfaden ins eigene Home (z. B. eigene
-  Schriften), Installationsquelle, WebView2-Browserprofil, Nutzungsstatistik, Protokolle.
+- Persönliche Daten werden entfernt: Benutzername → `user` (bleibt auch auf dem anderen Mac so, siehe Abschnitt 2),
+  Zuletzt-geöffnet-Listen, Registry-Einträge mit Pfaden ins eigene Home (z. B. eigene
+  Schriften), Installationsquelle, WebView2-Browserprofil, Nutzungsstatistik, Protokolle, Rechnername und Domain
+  (Wine setzt sie beim Start aus dem jeweiligen Mac neu), Gecko-Profil (`wine_gecko`). Danach durchsucht das Skript
+  den ganzen Prefix (Text und binär, auch UTF-16) nach Benutzername, vollem Namen, Rechnername, Domain und
+  8.3-Kurzname (z. B. `ABCD~…`) – bei einem Treffer bricht `build-dmg.sh` ab und nennt die Dateien.
+- Der Inhalt (Wine + Prefix) liegt in der DMG im versteckten Ordner `.solidedge-inhalt` neben der App.
 - Auf dem anderen Mac: DMG öffnen, App nach /Programme ziehen, beim ersten Start **Rechtsklick → Öffnen**
-  (nicht signiert), Rosetta 2 muss installiert sein.
-- Vor dem Weitergeben einmal mit leerem Datenordner testen – Fehler beim allerersten Start sieht man sonst nicht:
+  (nicht signiert), Rosetta 2 muss installiert sein. **Die DMG beim ersten Start geöffnet lassen** und im
+  Wartefenster den Modus wählen – der Starter kopiert den Inhalt von dort (~13 GB, einige Minuten, mit
+  Fortschrittsanzeige; Wine immer in die App, den Prefix je nach Modus); danach kann sie weg. Direkt aus der DMG
+  startet die App nicht.
+- Vor dem Weitergeben einmal mit leerem Datenordner testen – Fehler beim allerersten Start sieht man sonst nicht.
+  Dazu die App aus der geöffneten DMG in einen beschreibbaren Ordner ziehen (z. B. `~/se-test`, nicht über die
+  eigene App in Programme) und starten:
   ```bash
-  SE_DATA_DIR=/tmp/se-test "/Volumes/Solid Edge 2026/Solid Edge 2026.app/Contents/MacOS/SolidEdge2026"
+  open -n --env SE_DATA_DIR=/tmp/se-test --env SE_MODUS=installiert "$HOME/se-test/Solid Edge 2026.app"
   ```
 - **Nur für eigene Macs** – siehe Abschnitt 1.
 
@@ -222,8 +270,9 @@ Ausführliche Analysen (mit Adressen und Messungen) stehen in `docs/`.
 
 ## 7. Fehlersuche
 
-- **Protokoll:** `~/solid-edge-macos/logs/` (Installation) bzw. `~/Library/Application Support/SolidEdge2026/start.log` (App).
-  Mehr Wine-Meldungen: `WINEDEBUG=err+all` vor den Start setzen.
+- **Protokoll:** `~/solid-edge-macos/logs/` (Installation); App: `~/Library/Application Support/SolidEdge2026/start.log`
+  (Installiert) bzw. `Solid Edge 2026.app/Contents/Resources/inhalt/start.log` (Portabel; Rechtsklick auf die App →
+  „Paketinhalt zeigen“). Mehr Wine-Meldungen: `WINEDEBUG=err+all` vor den Start setzen.
 - **Hängt beim Start, 0 % CPU:** im Log nach `wait timed out` suchen – das zeigt Deadlocks mit beteiligten
   Sperren.
 - **Testläufe mit Diagnose:** `mesa-test.sh` startet Solid Edge mit einer Testdatei und optionalen Schaltern
@@ -242,6 +291,8 @@ Ausführliche Analysen (mit Adressen und Messungen) stehen in `docs/`.
 - Die WebView2-Startseite („Starten“/„Lernen“) bleibt leer.
 - Doppelklick auf `.par`/`.asm`/`.dft` im Finder öffnet sie noch nicht in Solid Edge.
 - Die App ist nicht signiert/notarisiert (Rechtsklick → Öffnen beim ersten Start).
+- Portabel: Der allererste Start von Solid Edge dauert ~70 s statt ~20 s – macOS (`tccd`) prüft dabei jeden
+  Schreibzugriff in das App-Bundle; ab dem zweiten Start ~7 s.
 - Nur kurz getestet: Baugruppen, Blech, Zeichnungen, synchrone Konstruktion, Simulation, 3D-Druck.
 - Wine/Mesa melden fehlende Vulkan-Funktionen (`logicOp`, `wideLines`, `depth_clip_enable`); in seltenen
   Fällen sind kleine Darstellungsfehler möglich.

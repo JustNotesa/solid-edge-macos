@@ -29,7 +29,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$SE_ROOT/app/launcher.sh" "$APP/Contents/MacOS/SolidEdge2026"
 chmod +x "$APP/Contents/MacOS/SolidEdge2026"
 cp "$SE_ROOT/app/Info.plist" "$APP/Contents/Info.plist"
-[ -f "$SE_ROOT/app/AppIcon.icns" ] && cp "$SE_ROOT/app/AppIcon.icns" "$APP/Contents/Resources/"
+# App-Symbol aus der installierten Edge.exe (das Siemens-Symbol liegt bewusst nicht im Repo).
+"$SE_ROOT/app/icon-erzeugen.sh" "$SE_EXE" "$APP/Contents/Resources/AppIcon.icns" \
+  || echo "Hinweis: kein App-Symbol erzeugt (7z fehlt?) – die App bekommt das Standardsymbol."
 
 step "Wine-Runtime übernehmen (APFS-Klon)"
 cp -cR "$SE_ROOT/runtime/Wine Staging.app/Contents/Resources/wine" "$APP/Contents/Resources/wine"

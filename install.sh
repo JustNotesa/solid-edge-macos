@@ -11,6 +11,9 @@ winpfad() { "$WINE" winepath -w "$1" 2>/dev/null; }
 # NGen (.NET-Vorkompilierung) hängt unter Wine oft endlos bei 100 % CPU und blockiert damit den
 # .NET-Installer. Dieser Wächter beendet NGen-Prozesse, die länger als 5 Minuten laufen.
 ngen_waechter() {
+  # Läuft als Hintergrund-Subshell und erbt sonst „set -e“/pipefail: Findet grep (noch) kein NGen, würde sich der
+  # Wächter in der ersten Runde still beenden.
+  set +e +o pipefail
   while true; do
     ps -axo pid=,etime=,command= | grep -E '(mscorsvw|ngen)\.exe' | grep -v grep | while read -r pid et _; do
       min=$(echo "$et" | awk -F'[-:]' '{n=NF; print (n>=3 ? $(n-2)*60 : 0) + $(n-1)}')

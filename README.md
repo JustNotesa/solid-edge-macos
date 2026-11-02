@@ -51,53 +51,41 @@ Mac-Ordner, DMG für andere Macs. Bekannte Lücke: Startseite („Starten“/„
 
 | Pfad | Inhalt |
 |---|---|
-| `Solid_Edge_Community_2026_2510.zip`, `installer/` | Original-Installer von Siemens (gepackt/entpackt) |
-| `runtime/Wine Staging.app` | portables Wine Staging 11.18 ([Gcenx/macOS_Wine_builds](https://github.com/Gcenx/macOS_Wine_builds)) |
-| `runtime/dxvk/` | [DXVK-macOS](https://github.com/Gcenx/DXVK-macOS) 1.10.3 |
-| `runtime/mesa-22.0.3/` | Mesa für Windows ([pal1000/mesa-dist-win](https://github.com/pal1000/mesa-dist-win)) |
+| `install-online.sh` | Ein-Befehl-Installation (lädt das Projekt, ruft `setup.sh --app --aufraeumen --starten`) |
+| `setup.sh` | Einrichtung: Prüfungen, Downloads, DLLs (Release oder `--selbst-bauen`), Installation, App/DMG |
+| `install.sh`, `install-opengl.sh`, `install-webview2.sh`, `set-standard.sh` | die eigentliche Installation in den Wine-Prefix |
+| `env.sh`, `start.sh` | Umgebung, Start ohne App |
+| `app/` (`launcher.sh`, `Info.plist`, `prefix-anonymisieren.py`), `build-dmg.sh` | App-Bundle und DMG |
 | `opengl-wrapper/` | eigene opengl32-Vorschaltung vor Mesa (Quelltext, `build.sh`, Tests) |
-| `d2d1-build/` | eigene d2d1.dll aus Wine-11.21-Quellen + Patches (`build.sh --install`) |
-| `prefix/` | Wine-Prefix („Laufwerk C:“) mit Solid Edge |
-| `env.sh`, `install*.sh`, `start.sh`, `set-standard.sh` | Umgebung, Installation, Start |
-| `app/`, `build-dmg.sh`, `dist/` | App-Bundle-Starter, DMG-Bau, fertiger DMG |
-| `mcp/`, `tools/` | MCP-Server zur Steuerung von Solid Edge durch KI-Assistenten (COM, Fensterbild, Eingabe) |
+| `d2d1-build/` | eigene d2d1.dll aus Wine-11.21-Quellen + Patches |
+| `patches/` | kleine Byte-Patches (Mesa `sampler`, d2d1-Freigabe-Reihenfolge) |
+| `mcp/`, `tools/` | MCP-Server zur Steuerung von Solid Edge durch KI-Assistenten (COM, Fensterbild, Eingabe), Diagnose |
 | `docs/` | Analyseberichte zu den einzelnen Fehlern |
 | `mesa-test.sh` | Testläufe mit Diagnose-Schaltern |
+| *nicht im Repo:* `installer/`, `runtime/`, `prefix/`, `dist/` | entstehen beim Einrichten (Siemens-Installer, Wine/DXVK/Mesa, Prefix, DMG) |
 
-Voraussetzungen zum Bauen: Rosetta 2, `brew install winetricks mingw-w64`, `python3`, `7z`.
-
-## Benutzung
-
-Installieren und starten (auf diesem Mac):
+## Benutzung (Entwicklung)
 
 ```bash
-./install.sh
+git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh
 ```
 
 ```bash
 ./start.sh
 ```
 
-DMG für einen anderen Mac bauen (Solid Edge wird dafür beendet):
-
-```bash
-./build-dmg.sh
-```
-
-Auf dem anderen Mac: DMG öffnen, „Solid Edge 2026“ nach /Programme ziehen, beim ersten Start Rechtsklick →
-Öffnen (nicht von Apple signiert). Rosetta 2 muss installiert sein. Der erste Start kopiert die Umgebung
-(~13 GB) nach `~/Library/Application Support/SolidEdge2026` und stellt Benutzername sowie die Ordner
-Dokumente/Schreibtisch/Downloads auf den aktuellen Benutzer um; Laufwerk `Z:` ist die Mac-Festplatte.
-Die Community-Lizenzdatei ist enthalten – nur auf eigenen Macs verwenden.
-
-Dateien öffnen/speichern: Im Solid-Edge-Dialog „Dokumente“, „Desktop“ oder „Downloads“ wählen (= gleichnamige
-Mac-Ordner) oder über `Z:\Users\<name>\…` beliebige Orte.
+- `./setup.sh --app` legt zusätzlich die App nach /Programme, `--dmg` baut eine DMG für weitere eigene Macs
+  (persönliche Daten werden entfernt; **nicht öffentlich weitergeben** – sie enthält Solid Edge und die Lizenz),
+  `--selbst-bauen` baut die zwei DLLs aus dem Quelltext (braucht `brew install mingw-w64`).
+- Dateien öffnen/speichern: Im Solid-Edge-Dialog „Dokumente“, „Desktop“ oder „Downloads“ (= gleichnamige
+  Mac-Ordner) oder über `Z:\Users\<name>\…` beliebige Orte.
+- Ausführlich: [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md).
 
 ## Entwicklungsprotokoll
 
 Die folgenden Abschnitte dokumentieren den Weg dorthin (Versuche, Messungen, verworfene Ansätze).
 
-### OpenGL-Versuche mit Mesa (in Arbeit)
+### OpenGL-Versuche mit Mesa
 
 - Mesa für Windows 26.2.4 ([pal1000/mesa-dist-win](https://github.com/pal1000/mesa-dist-win), x64 release-msvc)
   liegt in `runtime/mesa/`. Der Build enthält llvmpipe und Zink und kennt `MESA_GL_VERSION_OVERRIDE`,

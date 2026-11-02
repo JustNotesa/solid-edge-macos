@@ -1,8 +1,8 @@
-# Solid Edge 2026 Community Edition auf dem Mac – als eigene App bzw. DMG bauen
+# Solid Edge 2026 Community Edition auf dem Mac – Anleitung
 
 Diese Anleitung zeigt, wie man **Siemens Solid Edge 2026 Community Edition** auf einem Mac mit Apple Silicon
-(M1–M4) lauffähig macht und daraus eine **„Solid Edge 2026.app“ in einer DMG** baut, die man auf seine
-anderen Macs kopieren kann – ohne virtuelle Maschine, mit **GPU-Beschleunigung** für Oberfläche und 3D-Ansicht.
+(M1–M4) als normale **„Solid Edge 2026.app“** zum Laufen bringt – mit **einem Terminal-Befehl**, ohne virtuelle
+Maschine, mit **GPU-Beschleunigung** für Oberfläche und 3D-Ansicht. Optional entsteht eine DMG für weitere eigene Macs.
 
 Grundlage ist [cryinkfly/Solid-Edge-on-Linux](https://codeberg.org/cryinkfly/Solid-Edge-on-Linux) (Wine-Prefix,
 `winetricks win11`, Original-Installer) und die Linux-Fixes aus
@@ -49,31 +49,29 @@ Schritt für Schritt beschrieben, die zugehörigen Skripte und Patches liegen in
 
 ## 2. Was am Ende herauskommt
 
-- `SolidEdge2026-macOS.dmg` (~5,7 GB, LZFSE-komprimiert) mit einer `Solid Edge 2026.app`.
-- Die App bringt alles mit: Wine, Grafik-Bibliotheken, einen fertig eingerichteten „Windows“-Ordner (Prefix)
-  mit Solid Edge. Auf dem Ziel-Mac ist nur **Rosetta 2** nötig.
-- Beim ersten Start kopiert die App den Prefix (~13 GB) nach
-  `~/Library/Application Support/SolidEdge2026` und stellt ihn auf den aktuellen Benutzer um (Benutzername,
-  Ordner Dokumente/Schreibtisch/Downloads, Laufwerk `Z:` = Mac-Festplatte).
+- **„Solid Edge 2026“ im Ordner Programme**, startbar per Doppelklick wie jedes Mac-Programm (kein „Rechtsklick →
+  Öffnen“ nötig, weil die App auf deinem Mac gebaut wird).
+- Die App bringt alles mit: Wine, Grafik-Bibliotheken und einen fertig eingerichteten „Windows“-Ordner (Prefix)
+  mit Solid Edge. Beim ersten Start legt sie ihren Arbeitsordner unter `~/Library/Application Support/SolidEdge2026`
+  an (APFS-Klon, fast ohne zusätzlichen Platz) und stellt ihn auf deinen Benutzer um (Ordner Dokumente/Schreibtisch/
+  Downloads, Laufwerk `Z:` = Mac-Festplatte).
 - Leistung auf dem Test-Mac: Start in ~30 s, ~25 Threads, ~1,7 GB Speicher, Drehen/Zoomen flüssig.
+- Optional: `SolidEdge2026-macOS.dmg` (~5,7 GB) für weitere **eigene** Macs, ohne persönliche Daten.
 
 ---
 
 ## 3. Voraussetzungen
 
-| Was | Wofür |
+| Was | Hinweis |
 |---|---|
 | Mac mit Apple Silicon, macOS 13 oder neuer | getestet mit macOS 26 |
-| Rosetta 2 (`softwareupdate --install-rosetta`) | Wine läuft als x86_64-Programm |
-| ~60 GB freier Speicher während des Baus | Prefix 13 GB, Installer 5 GB, DMG 6 GB, Kopien |
-| Homebrew mit `winetricks`, `mingw-w64`, `p7zip` | .NET-Installation, Bau der zwei eigenen DLLs, Entpacken von Mesa |
-| `python3` (bei macOS dabei) | kleine Byte-Patches |
-| `Solid_Edge_Community_2026_2510.zip` | von [Siemens](https://resources.sw.siemens.com/en-US/download-solid-edge-community-edition) (Registrierung) |
-| Zeit | ~1,5 h, davon ~45 min .NET 4.8 |
+| ~40 GB freier Speicher während der Installation | danach ~15 GB (App), die Bau-Dateien werden gelöscht |
+| Internet, ~1 GB Downloads + 5 GB Siemens-Installer | Wine, DXVK, Mesa, WebView2, .NET |
+| Siemens-Konto (kostenlos) | für den Download der Community Edition |
+| ~30 Minuten | das meiste ist die .NET-Installation |
 
-```bash
-brew install winetricks mingw-w64 p7zip
-```
+Alles Weitere – Rosetta 2, [Homebrew](https://brew.sh) mit `winetricks` und `p7zip` – installiert der Befehl
+bei Bedarf selbst (dabei fragt macOS ggf. einmal nach deinem Passwort).
 
 > **Homebrew-Wine geht nicht:** Die Wine-Casks von Homebrew sind seit 01.09.2026 wegen Gatekeeper gesperrt.
 > Deshalb ein portables Wine aus den Gcenx-Builds (siehe unten), das nicht installiert werden muss.
@@ -110,108 +108,89 @@ die Vulkan-Funktion `nullDescriptor`, die MoltenVK nicht hat. 22.0.3 liest das G
 
 ## 5. Schritt für Schritt
 
-Alle Befehle im Projektordner ausführen. Schwere Schritte laufen auf Wunsch mit niedriger Priorität.
+### 5.1 Der schnelle Weg: ein Befehl
 
-### 5.1 Projekt und Laufzeiten bereitlegen
-
-1. Projekt (Skripte, Patches, Quelltexte) in einen Ordner legen, z. B. `~/solidedge`.
-2. `Solid_Edge_Community_2026_2510.zip` in diesen Ordner legen und nach `installer/` entpacken
-   (darin liegt `installer/Solid Edge/Siemens Solid Edge 2026.msi`).
-3. Wine Staging 11.18 von Gcenx herunterladen und als `runtime/Wine Staging.app` ablegen.
-   Da die Datei aus dem Internet kommt, einmal die Quarantäne entfernen:
-   ```bash
-   xattr -dr com.apple.quarantine "runtime/Wine Staging.app"
-   ```
-4. DXVK-macOS 1.10.3 nach `runtime/dxvk/dxvk-macOS-async-v1.10.3-20230507/` entpacken.
-5. Die nanosvg-Header aus solid-edge-wine-fixes nach `downloads/se-wine-fixes/third_party/nanosvg/` legen.
-
-`env.sh` setzt alle Pfade (`WINEPREFIX=prefix/`, Wine-Binary, `GALLIUM_DRIVER=zink`, Schalter der
-Vorschaltung). Der Normenstandard für neue Dokumente ist `DIN Metric`, änderbar über `SE_STANDARD`.
-
-### 5.2 Die zwei eigenen DLLs bauen
+Terminal öffnen (Programme → Dienstprogramme → Terminal) und einfügen:
 
 ```bash
-./d2d1-build/build.sh
+curl -fsSL https://raw.githubusercontent.com/JustNotesa/solid-edge-macos/main/install-online.sh | bash
 ```
+
+1. Das Skript prüft den Mac, installiert bei Bedarf Homebrew und Rosetta 2 und lädt dieses Projekt nach
+   `~/solid-edge-macos`.
+2. Es öffnet die **Siemens-Seite**: dort registrieren und „Solid Edge Community Edition“ herunterladen
+   (`Solid_Edge_Community_2026_….zip`, ~5 GB). Die Datei **in „Downloads“ lassen** – das Terminal wartet, bis der
+   Download fertig ist (die Größe bleibt stehen, kein `.crdownload`/`.download` mehr), und macht dann allein weiter.
+3. Nach ~30 Minuten liegt **„Solid Edge 2026“ in Programme**, die Bau-Dateien sind gelöscht und die App startet.
+
+Den Befehl kannst du jederzeit erneut ausführen: Er aktualisiert die Skripte und überspringt Erledigtes.
+Den Siemens-Download in „Downloads“ kannst du danach löschen.
+
+### 5.2 Was dabei im Einzelnen passiert
+
+`install-online.sh` ruft `setup.sh --app --aufraeumen --starten` auf. `setup.sh` macht:
+
+1. **Mac prüfen:** Apple Silicon, Rosetta 2 (sonst `softwareupdate --install-rosetta`), freier Speicher.
+2. **Werkzeuge:** `brew install winetricks p7zip` (nur was fehlt).
+3. **Installer:** `Solid_Edge_Community*.zip` im Projektordner oder in `~/Downloads` suchen bzw. darauf warten und
+   nach `installer/` entpacken.
+4. **Laufzeiten laden:** Wine Staging 11.18 (Gcenx) nach `runtime/Wine Staging.app` (Quarantäne-Attribut wird
+   entfernt), DXVK-macOS 1.10.3 nach `runtime/dxvk/`.
+5. **Die zwei eigenen DLLs** (`d2d1.dll`, `opengl32.dll`) aus dem
+   [GitHub-Release](https://github.com/JustNotesa/solid-edge-macos/releases) laden und die SHA-256-Prüfsummen
+   kontrollieren – oder mit `--selbst-bauen` aus dem Quelltext bauen (`brew install mingw-w64`, dann
+   `d2d1-build/build.sh` lädt die Wine-11.21-Quellen und wendet die Patches `0001` SVG/nanosvg und `0002`
+   geteiltes D3D-Gerät an; die opengl32-Vorschaltung baut `install-opengl.sh`).
+6. **`install.sh`:**
+   1. Prefix anlegen (`wineboot`, nur beim ersten Mal).
+   2. **Wine Mono entfernen** und die .NET-4-Registrierung beider Registry-Ansichten leeren – sonst meldet der
+      .NET-Installer „schon installiert“ und tut nichts.
+   3. **.NET Framework 4.8** über winetricks; ein Wächter beendet hängende NGen-Prozesse (`mscorsvw.exe` hängt
+      unter Wine endlos bei 100 % CPU), danach wird der NGen-Dienst abgeschaltet.
+   4. **Windows 11** als Windows-Version.
+   5. **Mac-Tastatur:** beide Cmd = Strg (Cmd+C/V/Z wie am Mac), rechte Option = Alt, linke Option bleibt Option
+      (für @ € { } auf der deutschen Tastatur).
+   6. **Menüs nicht über andere Programme legen:** `WindowsFloatWhenInactive=none`.
+   7. **Grafik:** DXVK (d3d10core/d3d11/dxgi) und die eigene `d2d1.dll` nach `system32`, Overrides auf `native`.
+   8. **WebView2 Runtime** still installieren; Browser-Optionen über die **WebView2-Policy** (Solid Edge ignoriert
+      die Umgebungsvariable); Edge-Update-Dienste aus.
+   9. **VC++ 2022**, dann **Solid Edge** per `msiexec /qn` mit der mitgelieferten Community-Lizenz. Der
+      Installer-Ordner wird dafür kurz als Laufwerk `S:` eingehängt – mit langen Unix-Pfaden stürzt Wines msiexec ab.
+   10. **OpenGL** (`install-opengl.sh`): Mesa 22.0.3 laden, `libgallium_wgl.dll` mit
+       `patches/patch-mesa-sampler-name.py` patchen, Vorschaltung + Mesa neben `Edge.exe`, Override nur für Edge.exe.
+   11. **Solid-Edge-Einstellungen:** kein IE-Startfenster, kein „Ordered/Synchronous“-Popup, DIN-Vorlagen.
+7. **App bauen** (`build-dmg.sh --app`): `app/launcher.sh` als Starter, Wine und Prefix per APFS-Klon ins Bundle,
+   persönliche Daten entfernen (`app/prefix-anonymisieren.py`), App nach /Programme.
+8. **Aufräumen** (`--aufraeumen`): Installer-Kopie, Laufzeiten, Prefix und Bau-Reste löschen – die App ist
+   eigenständig. **Starten** (`--starten`).
+
+Ohne `--aufraeumen` (z. B. `./setup.sh --app` nach eigenem `git clone`) bleibt der Arbeits-Prefix im
+Projektordner erhalten und Solid Edge lässt sich zusätzlich mit `./start.sh` starten.
+
+### 5.3 Testen
+
+Prüfliste: Menüband mit Symbolen · Teil öffnen (z. B. `C:\Program Files\Siemens\Solid Edge 2026\Training\block.par`)
+· 3D-Ansicht schattiert mit Kanten · Ansichtswürfel unten rechts mit Beschriftung beim Überfahren ·
+Auswahlrechteck beim Ziehen · Rechtsklick-Kontextmenü · Skizze anlegen und „Skizze schließen“ · offenes Profil in
+einer Extrusion (neues Teil) → Profilfehlerassistent.
+
+### 5.4 DMG für weitere eigene Macs
 
 ```bash
-./opengl-wrapper/build.sh runtime/mesa-22.0.3
+git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --dmg
 ```
 
-- `d2d1-build/build.sh` lädt die Wine-11.21-Quellen, wendet zwei Patches an und baut nur `dlls/d2d1`:
-  `0001` SVG-Dokumente mit nanosvg (aus solid-edge-wine-fixes), `0002` ein geteiltes Direct3D-Gerät statt eines
-  neuen pro Icon (siehe Abschnitt 6).
-- `opengl-wrapper/build.sh` baut die opengl32-Vorschaltung vor Mesa. Mesa selbst muss dafür einmal geladen
-  sein – das erledigt `install-opengl.sh` (Schritt 5.3) automatisch; wer hier schon baut, lädt Mesa vorher von
-  pal1000 nach `runtime/mesa-22.0.3/` (7z entpacken).
-
-### 5.3 Alles installieren
-
-```bash
-./install.sh
-```
-
-Das Skript macht in dieser Reihenfolge:
-
-1. **Prefix anlegen** (`wineboot`).
-2. **.NET Framework 4.8** über winetricks (~45 min). Ein Wächter beendet hängende NGen-Prozesse
-   (`mscorsvw.exe` hängt unter Wine endlos bei 100 % CPU); danach wird der NGen-Dienst abgeschaltet.
-3. **Windows 11** als Windows-Version (`winetricks win11`).
-4. **Mac-Tastatur:** beide Cmd = Strg (Cmd+C/V/Z wie am Mac), rechte Option = Alt, linke Option bleibt Option
-   (für @ € { } auf der deutschen Tastatur).
-5. **Menüs nicht über andere Programme legen:** `WindowsFloatWhenInactive=none` für Wines Mac-Treiber.
-6. **Grafik:** DXVK (d3d10core/d3d11/dxgi) und die eigene `d2d1.dll` nach `system32`, Overrides auf `native`.
-7. **WebView2 Runtime** still installieren; Solid Edge ignoriert die Umgebungsvariable für Browser-Optionen,
-   deshalb werden `--no-sandbox --disable-gpu …` über die **WebView2-Policy** gesetzt; Edge-Update-Dienste aus.
-8. **VC++ 2022** aus dem Installer-Paket, dann **Solid Edge** per `msiexec /qn` mit der mitgelieferten
-   Community-Lizenz (Rückgabewert 103 unter Wine ist normal, maßgeblich ist, ob `Edge.exe` da ist).
-9. **OpenGL** (`install-opengl.sh`): Mesa 22.0.3 laden, `libgallium_wgl.dll` mit
-   `patches/patch-mesa-sampler-name.py` patchen, Vorschaltung + Mesa neben `Edge.exe`, Override nur für `Edge.exe`.
-10. **Solid-Edge-Einstellungen:** kein IE-Startfenster (`mshtml`/`ieframe` für Edge.exe aus), kein
-    „Ordered/Synchronous“-Popup, DIN-Vorlagen (`set-standard.sh`).
-
-### 5.4 Testen
-
-```bash
-./start.sh
-```
-
-Prüfliste: Menüband mit Symbolen · Teil öffnen (z. B. `Training\block.par`) · 3D-Ansicht schattiert mit Kanten ·
-Ansichtswürfel unten rechts mit Beschriftung beim Überfahren · Auswahlrechteck beim Ziehen ·
-Rechtsklick-Kontextmenü · Skizze anlegen und „Skizze schließen“ · offenes Profil in einer Extrusion →
-Profilfehlerassistent.
-
-### 5.5 App und DMG bauen
-
-```bash
-./build-dmg.sh
-```
-
-- Baut `Solid Edge 2026.app`: Starter `app/launcher.sh` als `Contents/MacOS/SolidEdge2026`, `app/Info.plist`,
-  Wine-Laufzeit und Prefix als Vorlage unter `Contents/Resources/` (per APFS-Klon, kostet keinen Platz).
-- Räumt den Prefix auf (Temp, Logs, Laufwerks-Links, Diagnoseordner, Testdateien) und **entfernt persönliche
-  Daten** (`app/prefix-anonymisieren.py`): Benutzername → `user` (der Starter setzt beim ersten Start den
-  jeweiligen Mac-Benutzer ein), Zuletzt-geöffnet-Listen, Registry-Einträge mit Pfaden ins eigene Home
-  (z. B. eigene Schriften), Installationsquelle, WebView2-Browserprofil, Nutzungsstatistik, Protokolle.
-- Mit `--app` wird statt der DMG nur die App nach /Programme gelegt.
-- Packt mit `hdiutil` als LZFSE (`DMG_FORMAT=ULMO` für LZMA: kleiner, aber deutlich langsamer).
-
-Der Starter (`app/launcher.sh`) prüft Rosetta, kopiert beim ersten Start den Prefix, benennt das
-Wine-Benutzerprofil um, passt die Registry an, setzt die Ordner-Links auf den Mac-Home-Ordner und startet
-`Edge.exe` mit denselben Schaltern wie `env.sh`. Der Datenordner lässt sich zum Testen umlenken:
-
-```bash
-SE_DATA_DIR=/tmp/se-test "/Volumes/Solid Edge 2026/Solid Edge 2026.app/Contents/MacOS/SolidEdge2026"
-```
-
-**Immer einmal so testen** – Fehler, die nur beim allerersten Start auftreten, sieht man sonst nicht.
-
-### 5.6 Auf dem anderen Mac
-
-1. DMG öffnen, App nach /Programme ziehen.
-2. Erster Start: **Rechtsklick → Öffnen** (App ist nicht von Apple signiert).
-3. Ein paar Minuten warten (Kopie), danach startet Solid Edge.
-4. Dateien öffnen/speichern: im Dialog „Dokumente“, „Desktop“, „Downloads“ (= Mac-Ordner) oder Laufwerk `Z:`.
+- Ergebnis: `dist/SolidEdge2026-macOS.dmg` (LZFSE; `DMG_FORMAT=ULMO` für LZMA, kleiner, deutlich langsamer).
+- Persönliche Daten werden entfernt: Benutzername → `user` (der Starter setzt beim ersten Start den jeweiligen
+  Mac-Benutzer ein), Zuletzt-geöffnet-Listen, Registry-Einträge mit Pfaden ins eigene Home (z. B. eigene
+  Schriften), Installationsquelle, WebView2-Browserprofil, Nutzungsstatistik, Protokolle.
+- Auf dem anderen Mac: DMG öffnen, App nach /Programme ziehen, beim ersten Start **Rechtsklick → Öffnen**
+  (nicht signiert), Rosetta 2 muss installiert sein.
+- Vor dem Weitergeben einmal mit leerem Datenordner testen – Fehler beim allerersten Start sieht man sonst nicht:
+  ```bash
+  SE_DATA_DIR=/tmp/se-test "/Volumes/Solid Edge 2026/Solid Edge 2026.app/Contents/MacOS/SolidEdge2026"
+  ```
+- **Nur für eigene Macs** – siehe Abschnitt 1.
 
 ---
 
@@ -243,7 +222,7 @@ Ausführliche Analysen (mit Adressen und Messungen) stehen in `docs/`.
 
 ## 7. Fehlersuche
 
-- **Protokoll:** `logs/` (Installation) bzw. `~/Library/Application Support/SolidEdge2026/start.log` (App).
+- **Protokoll:** `~/solid-edge-macos/logs/` (Installation) bzw. `~/Library/Application Support/SolidEdge2026/start.log` (App).
   Mehr Wine-Meldungen: `WINEDEBUG=err+all` vor den Start setzen.
 - **Hängt beim Start, 0 % CPU:** im Log nach `wait timed out` suchen – das zeigt Deadlocks mit beteiligten
   Sperren.

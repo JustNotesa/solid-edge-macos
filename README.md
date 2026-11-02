@@ -5,25 +5,27 @@ Apple Silicon. Solid Edge läuft als Windows-Programm in Wine, Wine selbst als x
 Alles läuft auf der GPU: Oberfläche (Direct2D/Direct3D) über DXVK → MoltenVK → Metal, 3D-Ansicht (OpenGL) über
 Mesa-Zink → Vulkan → MoltenVK → Metal.
 
-## Schnellstart
+## Schnellstart: ein Befehl
 
-Du brauchst einen Mac mit Apple Silicon, [Homebrew](https://brew.sh) und ~60 GB freien Speicher.
+Terminal öffnen (Programme → Dienstprogramme → Terminal), diese Zeile einfügen, Enter:
 
-1. Den Installer **„Solid Edge Community Edition“** bei
-   [Siemens](https://resources.sw.siemens.com/en-US/download-solid-edge-community-edition) herunterladen
-   (kostenlose Registrierung, `Solid_Edge_Community_2026_….zip`, ~5 GB) und in `~/Downloads` liegen lassen.
-2. Im Terminal:
-   ```bash
-   git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --app
-   ```
-3. Warten (~1–1,5 h, das meiste ist .NET Framework). Danach „Solid Edge 2026“ im Ordner Programme starten.
+```bash
+curl -fsSL https://raw.githubusercontent.com/JustNotesa/solid-edge-macos/main/install-online.sh | bash
+```
 
-`setup.sh` prüft Rosetta 2, installiert `winetricks` und `p7zip`, lädt Wine, DXVK, Mesa und die zwei fertig
-gebauten eigenen DLLs (Prüfsummen werden kontrolliert), installiert Solid Edge still und richtet alles ein.
-Mehrfach aufrufbar – erledigte Schritte werden übersprungen. Optionen: `./setup.sh --help`
-(`--dmg` für eine DMG für weitere eigene Macs, `--selbst-bauen` um die DLLs aus dem Quelltext zu bauen).
+Mehr ist nicht zu tun – außer einer Sache, die das Skript dir zeigt:
 
-Die ausführliche Anleitung mit allen Hintergründen steht in [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md).
+1. Es öffnet die **Siemens-Seite**. Dort kostenlos registrieren und **„Solid Edge Community Edition“**
+   herunterladen (`Solid_Edge_Community_2026_….zip`, ~5 GB). Die Datei einfach in **Downloads** lassen.
+2. Das Terminal wartet, bis der Download fertig ist, und macht dann allein weiter (~30 Minuten).
+3. Am Ende liegt **„Solid Edge 2026“ im Ordner Programme** und startet automatisch.
+
+Ggf. fragt das Skript einmal nach deinem Mac-Passwort (für Homebrew bzw. Rosetta 2, falls noch nicht vorhanden).
+Voraussetzungen: Mac mit Apple Silicon, ~40 GB freier Speicher während der Installation (danach ~15 GB).
+Läuft etwas schief: den Befehl einfach noch einmal ausführen – erledigte Schritte werden übersprungen.
+
+Wer lieber selbst klont: `git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --app`
+(Optionen: `./setup.sh --help`). Hintergründe: [ANLEITUNG-DMG.md](ANLEITUNG-DMG.md).
 
 ## Stand (02.11.2026)
 

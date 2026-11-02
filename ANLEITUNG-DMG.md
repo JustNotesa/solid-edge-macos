@@ -16,8 +16,9 @@ Schritt für Schritt beschrieben, die zugehörigen Skripte und Patches liegen in
 
 ---
 
-> **Nur schnell eine laufende Version?** `git clone https://github.com/JustNotesa/solid-edge-macos.git && cd solid-edge-macos && ./setup.sh --app`
-> – Installer-ZIP von Siemens vorher nach `~/Downloads` legen. Diese Anleitung erklärt, was dabei passiert.
+> **Nur schnell eine laufende Version?** Im Terminal:
+> `curl -fsSL https://raw.githubusercontent.com/JustNotesa/solid-edge-macos/main/install-online.sh | bash`
+> – das Skript öffnet die Siemens-Seite, wartet auf den Download und baut dann alles allein. Diese Anleitung erklärt, was dabei passiert.
 
 ## Inhalt
 

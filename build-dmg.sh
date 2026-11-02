@@ -57,7 +57,7 @@ python3 -I "$SE_ROOT/app/prefix-anonymisieren.py" "$P" "$U" user
 echo "user" > "$APP/Contents/Resources/prefix-user.txt"
 
 if [ "$NUR_APP" = 1 ]; then
-  ZIEL=/Applications; [ -w "$ZIEL" ] || { ZIEL="$HOME/Applications"; mkdir -p "$ZIEL"; }
+  ZIEL="${SE_APP_ZIEL:-/Applications}"; [ -w "$ZIEL" ] || { ZIEL="$HOME/Applications"; mkdir -p "$ZIEL"; }
   step "App nach $ZIEL legen"
   rm -rf "$ZIEL/$APP_NAME.app"
   mv "$APP" "$ZIEL/"

@@ -5,10 +5,12 @@
 #   ./setup.sh --app           zusätzlich „Solid Edge 2026.app“ unter /Programme anlegen (Start per Doppelklick)
 #   ./setup.sh --dmg           zusätzlich eine DMG für weitere eigene Macs bauen (nicht öffentlich weitergeben!)
 #   ./setup.sh --selbst-bauen  die zwei eigenen DLLs aus dem Quelltext bauen statt sie aus dem GitHub-Release zu laden
+#   ./setup.sh --aufraeumen    nach --app Bau-Dateien löschen (Installer-Kopie, Laufzeiten, Prefix; die App bleibt)
+#   ./setup.sh --starten       am Ende die App bzw. Solid Edge starten
 #
 # Was du selbst tun musst: den Solid-Edge-Installer bei Siemens herunterladen (kostenlose Registrierung) und die
 # ZIP-Datei in diesen Ordner oder nach ~/Downloads legen. Alles andere lädt und installiert das Skript.
-# Dauer beim ersten Mal: ca. 1–1,5 Stunden (davon ~45 min .NET Framework). Mehrfach aufrufbar – erledigte
+# Dauer beim ersten Mal: ca. 30–40 Minuten (das meiste ist .NET Framework). Mehrfach aufrufbar – erledigte
 # Schritte werden übersprungen.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -20,13 +22,15 @@ DXVK_NAME="dxvk-macOS-async-v1.10.3-20230507"
 DXVK_URL="https://github.com/Gcenx/DXVK-macOS/releases/download/v1.10.3-20230507/$DXVK_NAME.tar.gz"
 SIEMENS_URL="https://resources.sw.siemens.com/en-US/download-solid-edge-community-edition"
 
-APP=0; DMG=0; SELBST=0
+APP=0; DMG=0; SELBST=0; AUFRAEUMEN=0; STARTEN=0
 for a in "$@"; do
   case "$a" in
     --app) APP=1 ;;
     --dmg) DMG=1 ;;
     --selbst-bauen) SELBST=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --aufraeumen) AUFRAEUMEN=1 ;;
+    --starten) STARTEN=1 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $a (siehe ./setup.sh --help)" >&2; exit 2 ;;
   esac
 done
@@ -47,7 +51,7 @@ schritt "Mac prüfen"
 if [ "$(uname -m)" = arm64 ]; then
   if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
     echo "    Rosetta 2 fehlt – wird jetzt installiert (Apple-Lizenz wird dabei akzeptiert)."
-    softwareupdate --install-rosetta --agree-to-license
+    softwareupdate --install-rosetta --agree-to-license || sudo softwareupdate --install-rosetta --agree-to-license
   fi
   ok "Apple Silicon mit Rosetta 2"
 else
@@ -70,19 +74,28 @@ ok "winetricks, 7z$([ "$SELBST" = 1 ] && echo ", mingw-w64")"
 schritt "Solid-Edge-Installer"
 MSI="installer/Solid Edge/Siemens Solid Edge 2026.msi"
 if [ ! -f "$MSI" ]; then
-  ZIP="$(ls -t "$ROOT"/Solid_Edge_Community_2026*.zip "$HOME"/Downloads/Solid_Edge_Community_2026*.zip 2>/dev/null | head -1 || true)"
+  zip_suchen() { ls -t "$ROOT"/Solid_Edge_Community*.zip "$HOME"/Downloads/Solid_Edge_Community*.zip 2>/dev/null | head -1 || true; }
+  ZIP="$(zip_suchen)"
   if [ -z "$ZIP" ]; then
-    cat <<EOF
+    cat <<HINWEIS
 
-    Der Solid-Edge-Installer fehlt. So bekommst du ihn (kostenlos):
-      1. Auf der Siemens-Seite registrieren und „Solid Edge Community Edition“ herunterladen
-         (Datei „Solid_Edge_Community_2026_….zip“, ca. 5 GB).
-      2. Die ZIP-Datei in diesen Ordner oder nach ~/Downloads legen.
-      3. ./setup.sh erneut starten.
-    Die Seite wird jetzt im Browser geöffnet.
-EOF
+    Jetzt bist du dran – einmalig, kostenlos:
+      1. Im Browser öffnet sich gleich die Siemens-Seite. Dort registrieren und
+         „Solid Edge Community Edition“ herunterladen (Datei „Solid_Edge_Community_2026_….zip“, ca. 5 GB).
+      2. Die Datei einfach im Ordner „Downloads“ lassen.
+    Dieses Fenster wartet und macht automatisch weiter, sobald der Download fertig ist (Abbrechen: Ctrl+C).
+HINWEIS
     open "$SIEMENS_URL" 2>/dev/null || true
-    exit 1
+    printf '    Warte auf den Download '
+    until ZIP="$(zip_suchen)"; [ -n "$ZIP" ]; do printf '.'; sleep 10; done
+    # Fertig, wenn die Größe 20 s lang gleich bleibt und kein Teil-Download (.crdownload/.download/.part) daneben liegt.
+    alt=-1
+    while :; do
+      gr=$(stat -f %z "$ZIP" 2>/dev/null || echo 0)
+      if ! ls "$ZIP".crdownload "$ZIP".download "$ZIP".part >/dev/null 2>&1 && [ "$gr" = "$alt" ] && [ "$gr" -gt 1000000000 ]; then break; fi
+      alt=$gr; printf '.'; sleep 20
+    done
+    echo " ✓"
   fi
   echo "    Entpacke $(basename "$ZIP") …"
   mkdir -p installer
@@ -139,7 +152,7 @@ source ./env.sh
 if [ -f "$SE_EXE" ]; then
   ok "schon installiert ($WINEPREFIX) – übersprungen. Neu installieren: Ordner prefix/ löschen."
 else
-  echo "    Das dauert jetzt eine Weile (~1 h). Protokolle: logs/"
+  echo "    Das dauert jetzt eine Weile (~30 min). Protokolle: logs/"
   ./install.sh 2>&1 | tee logs/install.log
   [ -f "$SE_EXE" ] || fehler "Installation fehlgeschlagen – siehe logs/install.log"
   ok "installiert"
@@ -155,9 +168,22 @@ if [ "$DMG" = 1 ]; then
   ./build-dmg.sh
 fi
 
+APP_PFAD=""
+for d in ${SE_APP_ZIEL:+"$SE_APP_ZIEL"} /Applications "$HOME/Applications"; do [ -d "$d/Solid Edge 2026.app" ] && { APP_PFAD="$d/Solid Edge 2026.app"; break; }; done
+
+if [ "$AUFRAEUMEN" = 1 ] && [ -n "$APP_PFAD" ]; then
+  schritt "Aufräumen (die App enthält alles, was sie braucht)"
+  rm -rf installer runtime prefix build downloads/*.tar.* logs/*.log
+  ok "Bau-Dateien gelöscht; den Siemens-Download in „Downloads“ kannst du löschen"
+fi
+
 schritt "Fertig"
+if [ "$STARTEN" = 1 ]; then
+  if [ -n "$APP_PFAD" ]; then open "$APP_PFAD"; else (./start.sh </dev/null >/dev/null 2>&1 &); fi
+  echo "    Solid Edge startet (der allererste Start dauert ein paar Minuten länger)."
+fi
 cat <<EOF
-    Solid Edge starten:   ./start.sh$([ "$APP" = 1 ] && printf '\n                          oder „Solid Edge 2026“ im Ordner Programme')
+    Solid Edge starten:   $([ -n "$APP_PFAD" ] && echo "„Solid Edge 2026“ im Ordner Programme" || echo "./start.sh")
     Dateien:              im Solid-Edge-Dialog „Dokumente“, „Desktop“, „Downloads“ = deine Mac-Ordner,
                           Laufwerk Z: = ganze Mac-Festplatte
     Tastatur:             Cmd wirkt wie Strg (Cmd+C/V/Z/S), rechte Option = Alt

@@ -23,7 +23,11 @@ ngen_waechter() {
 }
 
 step "Wine-Prefix anlegen ($WINEPREFIX, Laufzeit $SE_RUNTIME)"
-$NIEDRIG "$WINE" wineboot -u
+# Nur für einen neuen Prefix: Auf einem Prefix mit .NET 4.8 hängt „wineboot -u“ endlos im 32-Bit-Teil
+# (rundll32 setupapi,InstallHinfSection Wow64Install) – etwa wenn setup.sh nach einem späteren Fehler erneut läuft.
+if [ ! -f "$WINEPREFIX/system.reg" ]; then
+  $NIEDRIG "$WINE" wineboot -u
+fi
 "$WINESERVER" -w
 
 step "winetricks: .NET Framework 4.8 (dauert ca. 30–45 Min)"

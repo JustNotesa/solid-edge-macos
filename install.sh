@@ -32,13 +32,16 @@ step "winetricks: .NET Framework 4.8 (dauert ca. 30–45 Min)"
 # schreibt die Schlüssel neu; winetricks löscht danach nur die 64-Bit-Ansicht. Der 32-Bit-.NET-4-Installer liest
 # Wow6432Node, meldet „bereits installiert“ und endet mit Erfolg, ohne etwas zu tun → dotnet48 bricht mit
 # „ngen.exe not found“ ab. Deshalb Mono hier selbst entfernen und erst DANACH beide Ansichten leeren
-# (dotnet40/48 rufen remove_mono dann ohne Wirkung erneut auf).
-WINE="$WINE" winetricks -q --unattended remove_mono
-"$WINESERVER" -w
-for k in 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4' 'HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP\v4'; do
-  "$WINE" reg delete "$k" /f >/dev/null 2>&1 || true
-done
-"$WINESERVER" -w
+# (dotnet40/48 rufen remove_mono dann ohne Wirkung erneut auf). Nur solange .NET 4.8 fehlt – bei einem erneuten
+# Aufruf würde das Löschen sonst die Registrierung des echten .NET 4.8 entfernen (winetricks überspringt dotnet48 dann).
+if ! grep -qsx dotnet48 "$WINEPREFIX/winetricks.log"; then
+  WINE="$WINE" winetricks -q --unattended remove_mono
+  "$WINESERVER" -w
+  for k in 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4' 'HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP\v4'; do
+    "$WINE" reg delete "$k" /f >/dev/null 2>&1 || true
+  done
+  "$WINESERVER" -w
+fi
 ngen_waechter & WAECHTER=$!
 trap 'kill $WAECHTER 2>/dev/null || true' EXIT
 WINE="$WINE" $NIEDRIG winetricks -q --unattended dotnet48 2>&1 | tee "$SE_LOGS/winetricks-dotnet48.log"

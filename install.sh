@@ -28,11 +28,14 @@ $NIEDRIG "$WINE" wineboot -u
 "$WINESERVER" -w
 
 step "winetricks: .NET Framework 4.8 (dauert ca. 30–45 Min)"
-# Wine Mono (shared install) trägt sich als .NET 4.7 ein – in der 64- UND der 32-Bit-Registry-Ansicht. winetricks
-# entfernt Mono, die Deinstallation bricht aber am fehlenden Framework\v4.0.30319\diasymreader.dll ab und lässt die
-# Schlüssel stehen; winetricks löscht danach nur die 64-Bit-Ansicht. Der 32-Bit-.NET-4-Installer liest dann
-# Wow6432Node, meldet „bereits installiert“ und beendet sich mit Erfolg, ohne etwas zu tun → dotnet48 bricht ab
-# („ngen.exe not found“). Deshalb beide Ansichten vorher leeren.
+# Wine Mono (shared install) trägt sich als .NET 4.7 ein – in der 64- UND der 32-Bit-Registry-Ansicht. Beim
+# Entfernen scheitert die Mono-Deinstallation am fehlenden Framework\v4.0.30319\diasymreader.dll, und ihr Rollback
+# schreibt die Schlüssel neu; winetricks löscht danach nur die 64-Bit-Ansicht. Der 32-Bit-.NET-4-Installer liest
+# Wow6432Node, meldet „bereits installiert“ und endet mit Erfolg, ohne etwas zu tun → dotnet48 bricht mit
+# „ngen.exe not found“ ab. Deshalb Mono hier selbst entfernen und erst DANACH beide Ansichten leeren
+# (dotnet40/48 rufen remove_mono dann ohne Wirkung erneut auf).
+WINE="$WINE" winetricks -q --unattended remove_mono
+"$WINESERVER" -w
 for k in 'HKLM\Software\Microsoft\NET Framework Setup\NDP\v4' 'HKLM\Software\Wow6432Node\Microsoft\NET Framework Setup\NDP\v4'; do
   "$WINE" reg delete "$k" /f >/dev/null 2>&1 || true
 done
